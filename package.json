@@ -1,0 +1,27 @@
+{
+  "name": "phoenix-channels",
+  "version": "0.0.1",
+  "description": "A Typescript Client for Elixir's Phoenix Channel, using RxJS patterns.",
+  "main": "index.ts",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VictorGaiva/phoenix-channels.git"
+  },
+  "keywords": [
+    "typescript",
+    "elixir",
+    "phoenix",
+    "channels",
+    "rxjs",
+    "websocket"
+  ],
+  "author": "VictorGaiva",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/VictorGaiva/phoenix-channels/issues"
+  },
+  "homepage": "https://github.com/VictorGaiva/phoenix-channels#readme"
+}
