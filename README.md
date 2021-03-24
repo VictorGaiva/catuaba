@@ -1,4 +1,4 @@
-# Phoenix-Channels
+# Catuaba
 
 ## Description
 A Typescript Client for connecting and interacting with Elixir's [Phoenix-Channels](https://hexdocs.pm/phoenix/channels.html), using [RxJS](https://rxjs-dev.firebaseapp.com/guide/overview)'s API.
