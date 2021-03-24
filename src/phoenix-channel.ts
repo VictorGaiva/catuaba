@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid";
-import { Observable, PartialObserver, Subject } from "rxjs";
+import { Observable, PartialObserver, Subject, } from "rxjs";
 import { filter, map } from "rxjs/operators";
 
 const DEFAULT_VSN = "2.0.0";
@@ -22,7 +22,7 @@ enum CHANNEL_STATE {
   leaving = "leaving",
 }
 
-enum MESSAGE_KIND {
+export enum MESSAGE_KIND {
   push = 0,
   reply = 1,
   broadcast = 2,
@@ -36,26 +36,26 @@ const TRANSPORTS = {
 type RawSocketMessage = string | ArrayBuffer;
 type PayloadType = Object | ArrayBuffer;
 
-type PushSocketMessage<T> = {
+export type PushSocketMessage<T> = {
   join_ref: string;
   topic: string;
   event: string;
   payload: T;
 };
-type ReplySocketMessage<T> = {
+export type ReplySocketMessage<T> = {
   join_ref: string;
   ref: string;
   topic: string;
   event: string;
   payload: { response: T; status: string };
 };
-type BroadcastSocketMessage<T> = {
+export type BroadcastSocketMessage<T> = {
   topic: string;
   event: string;
   payload: T;
 };
 
-type MessageFromSocket<T extends PayloadType = ArrayBuffer> =
+export type MessageFromSocket<T extends PayloadType = ArrayBuffer> =
   | PushSocketMessage<T>
   | ReplySocketMessage<T>
   | BroadcastSocketMessage<T>;
@@ -74,19 +74,38 @@ function isBinary(data: MessageToSocket<PayloadType>): data is MessageToSocket<A
 
 export function isPushMessage<T extends PayloadType>(data: MessageFromSocket<T>): data is PushSocketMessage<T> {
   const { join_ref, ref } = data as ReplySocketMessage<T>;
-  return join_ref !== undefined && ref === undefined;
+  return (join_ref !== undefined && join_ref !== null) && (ref === undefined || ref === null);
 }
 
 export function isReplyMessage<T extends PayloadType>(data: MessageFromSocket<T>): data is ReplySocketMessage<T> {
-  const { join_ref, ref } = data as ReplySocketMessage<T>;
-  return join_ref !== undefined && ref !== undefined;
+  const { ref } = data as ReplySocketMessage<T>;
+  return (ref !== undefined && ref !== null);
 }
 
-export function isBroadcastMessage<T extends PayloadType>(
-  data: MessageFromSocket<T>
-): data is BroadcastSocketMessage<T> {
+export function isBroadcastMessage<T extends PayloadType>(data: MessageFromSocket<T>): data is BroadcastSocketMessage<T> {
   const { join_ref, ref } = data as ReplySocketMessage<T>;
-  return join_ref === undefined && ref === undefined;
+  return (join_ref === undefined || join_ref === null) && (ref === undefined || ref === null);
+}
+
+export type ReplyChannelMessage<R extends PayloadType> = Pick<ReplySocketMessage<R>, "event" | "payload"> & { type: "reply" };
+export type BroadcastChannelMessage<R extends PayloadType> = Pick<BroadcastSocketMessage<R>, "event" | "payload"> & { type: "broadcast" }
+export type PushChannelMessage<R extends PayloadType> = Pick<PushSocketMessage<R>, "event" | "payload"> & { type: "push" }
+
+type ChannelMessage<R extends PayloadType> =
+  ReplyChannelMessage<R>
+  | BroadcastChannelMessage<R>
+  | PushChannelMessage<R>
+
+export function isReplyChannelMessage<T extends PayloadType>(data: ChannelMessage<T>): data is ReplyChannelMessage<T> {
+  return data.type === "reply"
+}
+
+export function isBroadcastChannelMessage<T extends PayloadType>(data: ChannelMessage<T>): data is BroadcastChannelMessage<T> {
+  return data.type === "broadcast"
+}
+
+export function isPushChannelMessage<T extends PayloadType>(data: ChannelMessage<T>): data is PushChannelMessage<T> {
+  return data.type === "push"
 }
 
 export class Serializer {
@@ -99,11 +118,19 @@ export class Serializer {
   }
 
   encode<T>(data: MessageToSocket<T>) {
-    return isBinary(data) ? this.binaryEncode(data) : JSON.stringify(data);
+    return isBinary(data) ? this.binaryEncode(data) : JSON.stringify([
+      data.join_ref, data.ref, data.topic, data.event, data.payload
+    ]);
   }
 
+  // TODO: fix typing
   decode<T>(data: RawSocketMessage): MessageFromSocket<T> {
-    return data instanceof ArrayBuffer ? this.binaryDecode(data) : JSON.parse(data);
+    if (data instanceof ArrayBuffer) {
+      //@ts-ignore
+      return this.binaryDecode(data)
+    }
+    const [join_ref, ref, topic, event, payload] = JSON.parse(data);
+    return { join_ref, ref, topic, event, payload }
   }
 
   private binaryEncode({ join_ref, ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
@@ -205,16 +232,25 @@ export class PhoenixSocket<R extends PayloadType = PayloadType, S extends Payloa
   private socket: WebSocket;
   private subject: Subject<MessageFromSocket<R>>;
 
-  private serializer: Serializer;
 
-  private open: Promise<void>;
+  private heartbeatChannel: PhoenixChannel<R, S>;
+  private heartbeatTimer: NodeJS.Timeout;
+  private heartbeatPromise: Promise<void> | null;
+
+  private queue: MessageToSocket<S>[];
+
+  private serializer: Serializer;
 
   constructor({ url, protocols }: { url: string; protocols?: string | string[] }) {
     this.socket = new WebSocket(url, protocols);
     this.subject = new Subject();
     this.serializer = new Serializer();
+    this.queue = [];
+    // No need to join the channel for heartbeats
+    this.heartbeatChannel = new PhoenixChannel<R, S>("phoenix", this);
 
     this.socket.addEventListener("close", (e) => {
+      clearInterval(this.heartbeatTimer);
       this.subject.complete();
     });
 
@@ -226,15 +262,29 @@ export class PhoenixSocket<R extends PayloadType = PayloadType, S extends Payloa
       }
     });
 
-    this.open = new Promise((res, rej) => {
-      this.socket.addEventListener("open", (e) => {
-        if (this.socket.readyState === WebSocket.OPEN) res();
-      });
+    this.socket.addEventListener("open", (e) => {
+      this.heartbeatTimer = setInterval(() => {
+        if (this.heartbeatPromise !== undefined) {
+          this.subject.error(e);
+          clearInterval(this.heartbeatTimer)
+        }
+        else {
+          this.heartbeatPromise = this.heartbeatChannel.run("heartbeat", {} as S, { force: true }).then(result => {
+            this.heartbeatPromise = undefined;
+            if (result.payload.status !== "ok") {
+              //TODO: Handle socket error?
+            }
+          })
+        }
+      }, 30000);
+      let queued: MessageToSocket<S>;
+      while (queued = this.queue.pop()) { this.send(queued); }
+    })
 
-      this.socket.addEventListener("error", (e) => {
-        this.subject.error(e);
-        rej();
-      });
+    // Todo: Reconnecting attempt
+    this.socket.addEventListener("error", (e) => {
+      this.subject.error(e);
+      clearInterval(this.heartbeatTimer)
     });
   }
 
@@ -244,7 +294,7 @@ export class PhoenixSocket<R extends PayloadType = PayloadType, S extends Payloa
 
   send(data: MessageToSocket<S>) {
     if (this.socket.readyState !== WebSocket.OPEN) {
-      this.open.then(() => this.socket.send(this.serializer.encode(data)));
+      this.queue.push(data)
     } else {
       this.socket.send(this.serializer.encode(data));
     }
@@ -258,56 +308,91 @@ export class PhoenixChannel<R extends PayloadType = PayloadType, S extends Paylo
   private _state: CHANNEL_STATE;
 
   private socket: PhoenixSocket<R, S>;
-  private subject: Subject<MessageFromSocket<R>>;
 
-  private data: Observable<MessageFromSocket<R>>;
-  private control: Observable<MessageFromSocket<R>>;
+  private $rawData: Observable<MessageFromSocket<R>>;
+  private $mappedData: Observable<ChannelMessage<R>>;
 
   private controlSequences: { event: CHANNEL_EVENT; ref: string }[];
 
+  private queue: MessageToSocket<S>[]
+
   constructor(topic: string, socket: PhoenixSocket<R, S>) {
-    this.join_ref = uuid();
     this.sequence = 1;
     this.topic = topic;
     this._state = CHANNEL_STATE.closed;
     this.controlSequences = [];
+    this.queue = [];
 
-    // Strongly type socket data even if an 'unknown' is passed
     this.socket = socket;
 
-    // Subscribe to socket messages
-    this.subject = new Subject();
-    this.socket.subscribe(this.subject);
-
     // Messages for this Channel
-    this.data = this.subject.pipe(filter(({ topic }) => topic === this.topic));
+    this.$rawData = new Observable<MessageFromSocket<R>>(subscriber => this.socket.subscribe(subscriber)).pipe(
+      filter(({ topic }) => topic === this.topic),
+    );
+
+    this.$mappedData = this.$rawData.pipe(
+      map(
+        (message) => {
+          if (isPushMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: "push"
+            }
+          if (isBroadcastMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: "broadcast"
+            }
+          if (isReplyMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: "reply"
+            }
+        })
+    );
 
     // Controller
-    this.control.subscribe({
+    this.$rawData.subscribe({
       complete: () => {
         this._state = CHANNEL_STATE.closed;
       },
       error: () => {
         this._state = CHANNEL_STATE.errored;
       },
-      next: () => {},
+      next: () => { },
     });
+
+    // Join the channel
   }
 
   get state() {
     return this._state;
   }
 
-  subscribe(observer: PartialObserver<MessageFromSocket<R>>) {
-    return this.data.pipe(map((value) => value[2])).subscribe(observer);
+  subscribe(observer: PartialObserver<ChannelMessage<R>>) {
+    return this.$mappedData.subscribe(observer);
+  }
+
+  toObservable() {
+    return new Observable<ChannelMessage<R>>(subscriber => this.$mappedData.subscribe(subscriber));
   }
 
   async join() {
+    this.join_ref = uuid();
+
     if (this._state !== CHANNEL_STATE.joined) {
       this._state = CHANNEL_STATE.joining;
       try {
         const result = await this.runCommand(CHANNEL_EVENT.phx_join);
-        if (result.payload.status === "ok") this._state = CHANNEL_STATE.joined;
+        if (result.payload.status === "ok") {
+          this._state = CHANNEL_STATE.joined;
+
+          let queued: MessageToSocket<S>;
+          while (queued = this.queue.pop()) { this.send(queued); }
+        }
         else console.log(result);
       } catch (err) {
         if (err) this._state = CHANNEL_STATE.errored;
@@ -333,7 +418,10 @@ export class PhoenixChannel<R extends PayloadType = PayloadType, S extends Paylo
   }
 
   next(event: string, payload: S) {
-    this.send({ event, join_ref: this.join_ref, ref: `${this.sequence++}`, payload, topic: this.topic });
+    if (this._state === CHANNEL_STATE.joined)
+      this.send({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
+    else
+      this.queue.push({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
   }
 
   private async runCommand(event: CHANNEL_EVENT.phx_join | CHANNEL_EVENT.phx_leave, payload?: S) {
@@ -347,8 +435,8 @@ export class PhoenixChannel<R extends PayloadType = PayloadType, S extends Paylo
     const response = new Promise<ReplySocketMessage<R>>((res, rej) => {
       let resolved = false;
       // Keep the sequence within the scope
-      const subscription = this.control.subscribe({
-        error: () => rej(),
+      const subscription = this.$rawData.subscribe({
+        error: err => rej(err),
         //
         complete: () => {
           if (!resolved) rej(`Subscription unexpectedly completed before receiving reponse.`);
@@ -374,21 +462,21 @@ export class PhoenixChannel<R extends PayloadType = PayloadType, S extends Paylo
         this._state = CHANNEL_STATE.leaving;
         break;
     }
-
     this.send({ event, join_ref: this.join_ref, ref, payload, topic: this.topic });
     return response;
   }
 
-  async run(event: string, payload?: S) {
+  async run(event: string, payload: S, opts?: { force: boolean }) {
+    const { force = false } = opts ?? {};
     // Keep the sequence within the scope
     const ref = `${this.sequence++}`;
 
     // Running some event
-    const response = new Promise<ReplySocketMessage<R>>((res, rej) => {
+    const response = new Promise<ReplyChannelMessage<R>>((res, rej) => {
       let resolved = false;
       // Keep the sequence within the scope
-      const subscription = this.data.subscribe({
-        error: () => rej(),
+      this.$rawData.subscribe({
+        error: err => rej(err),
         //
         complete: () => {
           if (!resolved) rej(`Subscription unexpectedly completed before receiving reponse.`);
@@ -398,14 +486,22 @@ export class PhoenixChannel<R extends PayloadType = PayloadType, S extends Paylo
             // Resolve the promise to the data when the sequence matches the expected value
             if (data.ref === ref) {
               resolved = true;
-              subscription.unsubscribe();
-              res(data);
+              // subscription.unsubscribe();
+              res({
+                event: data.event,
+                payload: data.payload,
+                type: "reply"
+              });
             }
           }
         },
       });
     });
-    this.send({ event, join_ref: this.join_ref, ref, payload, topic: this.topic });
+    if (this._state === CHANNEL_STATE.joined || force)
+      this.send({ event, join_ref: this.join_ref, ref, payload, topic: this.topic });
+    else
+      this.queue.push({ event, join_ref: this.join_ref, ref, payload, topic: this.topic });
     return response;
   }
 }
+

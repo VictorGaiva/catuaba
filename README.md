@@ -14,8 +14,11 @@ Typescript is becoming a _de facto_ standard for Front-end Development, being al
 - [x] Send and receive messages
 - [x] Handle Push, Reply and Broadcast message types
 - [x] Decode binary messages (pending validation since it was directly ported from https://github.com/mcampa/phoenix-channels)
+- [x] Heartbeats
+- [x] Queues
 
 ### Todo
+- [ ] Timeout
 - [ ] Validate the protocol
 - [ ] Validate payload types
 - [ ] Implement 'longpoll'
