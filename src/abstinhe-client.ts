@@ -1,9 +1,10 @@
 import { FetchResult, Operation } from "@apollo/client";
-import { PhoenixChannel, PhoenixSocket, isBroadcastMessage, MessageFromSocket, BroadcastSocketMessage } from "./phoenix-channel";
+import { PhoenixChannel, } from "./phoenix-channel";
 import { Observable } from "rxjs";
 import { v4 as uuid } from "uuid";
 import { filter, map } from "rxjs/operators";
 import { print } from 'graphql';
+import { BroadcastSocketMessage, isBroadcastMessage, MessageFromSocket, PhoenixSocket } from "./phoenix-socket";
 
 export class AbsintheSubscriptionClient<T extends FetchResult = FetchResult> {
   private operations: {

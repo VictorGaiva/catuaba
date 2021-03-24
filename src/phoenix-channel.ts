@@ -1,20 +1,9 @@
 import { v4 as uuid } from "uuid";
-import { Observable, PartialObserver, Subject, } from "rxjs";
+import { Observable, PartialObserver, } from "rxjs";
 import { filter, map } from "rxjs/operators";
+import { BroadcastSocketMessage, isBroadcastMessage, isPushMessage, isReplyMessage, MessageFromSocket, MessageToSocket, PhoenixSocket, PushSocketMessage, ReplySocketMessage, SocketPayloadType } from "./phoenix-socket";
 
-const DEFAULT_VSN = "2.0.0";
-const DEFAULT_TIMEOUT = 10000;
-const WS_CLOSE_NORMAL = 1000;
-
-enum CHANNEL_EVENT {
-  phx_close = "phx_close",
-  phx_error = "phx_error",
-  phx_join = "phx_join",
-  phx_reply = "phx_reply",
-  phx_leave = "phx_leave",
-}
-
-enum CHANNEL_STATE {
+export enum CHANNEL_STATE {
   closed = "closed",
   errored = "errored",
   joined = "joined",
@@ -22,286 +11,41 @@ enum CHANNEL_STATE {
   leaving = "leaving",
 }
 
-export enum MESSAGE_KIND {
-  push = 0,
-  reply = 1,
-  broadcast = 2,
-}
-
 const TRANSPORTS = {
   longpoll: "longpoll",
   websocket: "websocket",
 };
 
-type RawSocketMessage = string | ArrayBuffer;
-type PayloadType = Object | ArrayBuffer;
-
-export type PushSocketMessage<T> = {
-  join_ref: string;
-  topic: string;
-  event: string;
-  payload: T;
-};
-export type ReplySocketMessage<T> = {
-  join_ref: string;
-  ref: string;
-  topic: string;
-  event: string;
-  payload: { response: T; status: string };
-};
-export type BroadcastSocketMessage<T> = {
-  topic: string;
-  event: string;
-  payload: T;
-};
-
-export type MessageFromSocket<T extends PayloadType = ArrayBuffer> =
-  | PushSocketMessage<T>
-  | ReplySocketMessage<T>
-  | BroadcastSocketMessage<T>;
-
-type MessageToSocket<T extends PayloadType> = {
-  join_ref: string;
-  ref: string;
-  topic: string;
-  event: string;
-  payload: T;
-};
-
-function isBinary(data: MessageToSocket<PayloadType>): data is MessageToSocket<ArrayBuffer> {
-  return data.payload instanceof ArrayBuffer;
+export enum CHANNEL_EVENT {
+  phx_close = "phx_close",
+  phx_error = "phx_error",
+  phx_join = "phx_join",
+  phx_reply = "phx_reply",
+  phx_leave = "phx_leave",
 }
 
-export function isPushMessage<T extends PayloadType>(data: MessageFromSocket<T>): data is PushSocketMessage<T> {
-  const { join_ref, ref } = data as ReplySocketMessage<T>;
-  return (join_ref !== undefined && join_ref !== null) && (ref === undefined || ref === null);
-}
+export type ReplyChannelMessage<R extends SocketPayloadType> = Pick<ReplySocketMessage<R>, "event" | "payload"> & { type: "reply" };
+export type BroadcastChannelMessage<R extends SocketPayloadType> = Pick<BroadcastSocketMessage<R>, "event" | "payload"> & { type: "broadcast" }
+export type PushChannelMessage<R extends SocketPayloadType> = Pick<PushSocketMessage<R>, "event" | "payload"> & { type: "push" }
 
-export function isReplyMessage<T extends PayloadType>(data: MessageFromSocket<T>): data is ReplySocketMessage<T> {
-  const { ref } = data as ReplySocketMessage<T>;
-  return (ref !== undefined && ref !== null);
-}
-
-export function isBroadcastMessage<T extends PayloadType>(data: MessageFromSocket<T>): data is BroadcastSocketMessage<T> {
-  const { join_ref, ref } = data as ReplySocketMessage<T>;
-  return (join_ref === undefined || join_ref === null) && (ref === undefined || ref === null);
-}
-
-export type ReplyChannelMessage<R extends PayloadType> = Pick<ReplySocketMessage<R>, "event" | "payload"> & { type: "reply" };
-export type BroadcastChannelMessage<R extends PayloadType> = Pick<BroadcastSocketMessage<R>, "event" | "payload"> & { type: "broadcast" }
-export type PushChannelMessage<R extends PayloadType> = Pick<PushSocketMessage<R>, "event" | "payload"> & { type: "push" }
-
-type ChannelMessage<R extends PayloadType> =
+type ChannelMessage<R extends SocketPayloadType> =
   ReplyChannelMessage<R>
   | BroadcastChannelMessage<R>
   | PushChannelMessage<R>
 
-export function isReplyChannelMessage<T extends PayloadType>(data: ChannelMessage<T>): data is ReplyChannelMessage<T> {
+export function isReplyChannelMessage<T extends SocketPayloadType>(data: ChannelMessage<T>): data is ReplyChannelMessage<T> {
   return data.type === "reply"
 }
 
-export function isBroadcastChannelMessage<T extends PayloadType>(data: ChannelMessage<T>): data is BroadcastChannelMessage<T> {
+export function isBroadcastChannelMessage<T extends SocketPayloadType>(data: ChannelMessage<T>): data is BroadcastChannelMessage<T> {
   return data.type === "broadcast"
 }
 
-export function isPushChannelMessage<T extends PayloadType>(data: ChannelMessage<T>): data is PushChannelMessage<T> {
+export function isPushChannelMessage<T extends SocketPayloadType>(data: ChannelMessage<T>): data is PushChannelMessage<T> {
   return data.type === "push"
 }
 
-export class Serializer {
-  private HEADER_LENGTH: number;
-  private META_LENGTH: number;
-
-  constructor() {
-    this.HEADER_LENGTH = 1;
-    this.META_LENGTH = 4;
-  }
-
-  encode<T>(data: MessageToSocket<T>) {
-    return isBinary(data) ? this.binaryEncode(data) : JSON.stringify([
-      data.join_ref, data.ref, data.topic, data.event, data.payload
-    ]);
-  }
-
-  // TODO: fix typing
-  decode<T>(data: RawSocketMessage): MessageFromSocket<T> {
-    if (data instanceof ArrayBuffer) {
-      //@ts-ignore
-      return this.binaryDecode(data)
-    }
-    const [join_ref, ref, topic, event, payload] = JSON.parse(data);
-    return { join_ref, ref, topic, event, payload }
-  }
-
-  private binaryEncode({ join_ref, ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
-    const metaLength = this.META_LENGTH + join_ref.length + ref.length + topic.length + event.length;
-    const header = new ArrayBuffer(this.HEADER_LENGTH + metaLength);
-    const view = new DataView(header);
-    let offset = 0;
-
-    view.setUint8(offset++, MESSAGE_KIND.push);
-    view.setUint8(offset++, join_ref.length);
-    view.setUint8(offset++, ref.length);
-    view.setUint8(offset++, topic.length);
-    view.setUint8(offset++, event.length);
-
-    Array.from(join_ref, (char) => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(ref, (char) => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(topic, (char) => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(event, (char) => view.setUint8(offset++, char.charCodeAt(0)));
-
-    let combined = new Uint8Array(header.byteLength + payload.byteLength);
-    combined.set(new Uint8Array(header), 0);
-    combined.set(new Uint8Array(payload), header.byteLength);
-
-    return combined.buffer;
-  }
-
-  private binaryDecode(buffer: ArrayBuffer) {
-    const view = new DataView(buffer);
-    const kind = view.getUint8(0);
-    const decoder = new TextDecoder();
-    switch (kind) {
-      case MESSAGE_KIND.push:
-        return this.decodePush(buffer, view, decoder);
-      case MESSAGE_KIND.reply:
-        return this.decodeReply(buffer, view, decoder);
-      case MESSAGE_KIND.broadcast:
-        return this.decodeBroadcast(buffer, view, decoder);
-    }
-  }
-
-  private decodePush(buffer: ArrayBuffer, view: DataView, decoder: TextDecoder): PushSocketMessage<ArrayBuffer> {
-    const idSize = view.getUint8(1);
-    const topicSize = view.getUint8(2);
-    const eventSize = view.getUint8(3);
-
-    let offset = this.HEADER_LENGTH + this.META_LENGTH - 1; // pushes have no ref
-
-    const join_ref = decoder.decode(buffer.slice(offset, offset + idSize));
-    offset = offset + idSize;
-    const topic = decoder.decode(buffer.slice(offset, offset + topicSize));
-    offset = offset + topicSize;
-    const event = decoder.decode(buffer.slice(offset, offset + eventSize));
-    offset = offset + eventSize;
-    const payload = buffer.slice(offset, buffer.byteLength);
-
-    return { join_ref, topic, event, payload };
-  }
-
-  private decodeReply(buffer: ArrayBuffer, view: DataView, decoder: TextDecoder): ReplySocketMessage<ArrayBuffer> {
-    const idSize = view.getUint8(1);
-    const seqSize = view.getUint8(2);
-    const topicSize = view.getUint8(3);
-    const eventSize = view.getUint8(4);
-    let offset = this.HEADER_LENGTH + this.META_LENGTH;
-
-    const join_ref = decoder.decode(buffer.slice(offset, offset + idSize));
-    offset = offset + idSize;
-    const ref = decoder.decode(buffer.slice(offset, offset + seqSize));
-    offset = offset + seqSize;
-    const topic = decoder.decode(buffer.slice(offset, offset + topicSize));
-    offset = offset + topicSize;
-    const event = decoder.decode(buffer.slice(offset, offset + eventSize));
-    offset = offset + eventSize;
-
-    const data = buffer.slice(offset, buffer.byteLength);
-
-    return { join_ref, ref, topic, event: CHANNEL_EVENT.phx_reply, payload: { status: event, response: data } };
-  }
-
-  private decodeBroadcast(
-    buffer: ArrayBuffer,
-    view: DataView,
-    decoder: TextDecoder
-  ): BroadcastSocketMessage<ArrayBuffer> {
-    const topicSize = view.getUint8(1);
-    const eventSize = view.getUint8(2);
-    let offset = this.HEADER_LENGTH + 2;
-    const topic = decoder.decode(buffer.slice(offset, offset + topicSize));
-    offset = offset + topicSize;
-    const event = decoder.decode(buffer.slice(offset, offset + eventSize));
-    offset = offset + eventSize;
-    const payload = buffer.slice(offset, buffer.byteLength);
-
-    return { topic, event, payload };
-  }
-}
-
-export class PhoenixSocket<R extends PayloadType = PayloadType, S extends PayloadType = PayloadType> {
-  private socket: WebSocket;
-  private subject: Subject<MessageFromSocket<R>>;
-
-
-  private heartbeatChannel: PhoenixChannel<R, S>;
-  private heartbeatTimer: NodeJS.Timeout;
-  private heartbeatPromise: Promise<void> | null;
-
-  private queue: MessageToSocket<S>[];
-
-  private serializer: Serializer;
-
-  constructor({ url, protocols }: { url: string; protocols?: string | string[] }) {
-    this.socket = new WebSocket(url, protocols);
-    this.subject = new Subject();
-    this.serializer = new Serializer();
-    this.queue = [];
-    // No need to join the channel for heartbeats
-    this.heartbeatChannel = new PhoenixChannel<R, S>("phoenix", this);
-
-    this.socket.addEventListener("close", (e) => {
-      clearInterval(this.heartbeatTimer);
-      this.subject.complete();
-    });
-
-    this.socket.addEventListener("message", (e: MessageEvent<RawSocketMessage>) => {
-      try {
-        this.subject.next(this.serializer.decode(e.data));
-      } catch (err) {
-        this.subject.error(err);
-      }
-    });
-
-    this.socket.addEventListener("open", (e) => {
-      this.heartbeatTimer = setInterval(() => {
-        if (this.heartbeatPromise !== undefined) {
-          this.subject.error(e);
-          clearInterval(this.heartbeatTimer)
-        }
-        else {
-          this.heartbeatPromise = this.heartbeatChannel.run("heartbeat", {} as S, { force: true }).then(result => {
-            this.heartbeatPromise = undefined;
-            if (result.payload.status !== "ok") {
-              //TODO: Handle socket error?
-            }
-          })
-        }
-      }, 30000);
-      let queued: MessageToSocket<S>;
-      while (queued = this.queue.pop()) { this.send(queued); }
-    })
-
-    // Todo: Reconnecting attempt
-    this.socket.addEventListener("error", (e) => {
-      this.subject.error(e);
-      clearInterval(this.heartbeatTimer)
-    });
-  }
-
-  subscribe(observer: PartialObserver<MessageFromSocket<R>>) {
-    return this.subject.subscribe(observer);
-  }
-
-  send(data: MessageToSocket<S>) {
-    if (this.socket.readyState !== WebSocket.OPEN) {
-      this.queue.push(data)
-    } else {
-      this.socket.send(this.serializer.encode(data));
-    }
-  }
-}
-
-export class PhoenixChannel<R extends PayloadType = PayloadType, S extends PayloadType = PayloadType> {
+export class PhoenixChannel<R extends SocketPayloadType = SocketPayloadType, S extends SocketPayloadType = SocketPayloadType> {
   private join_ref: string;
   private topic: string;
   private sequence: number;
