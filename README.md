@@ -23,3 +23,4 @@ Typescript is becoming a _de facto_ standard for Front-end Development, being al
 - [ ] Validate payload types
 - [ ] Implement 'longpoll'
 - [ ] Tests
+- [ ] Documentation

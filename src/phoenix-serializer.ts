@@ -1,11 +1,13 @@
 import { CHANNEL_EVENT } from "./phoenix-channel";
-import { BroadcastSocketMessage, MessageFromSocket, MessageToSocket, MESSAGE_KIND, PushSocketMessage, RawSocketMessage, ReplySocketMessage, SocketPayloadType } from "./phoenix-socket";
+import {
+  BroadcastSocketMessage, MessageFromSocket, MessageToSocket,
+  MESSAGE_KIND, PushSocketMessage, RawSocketMessage,
+  ReplySocketMessage, SocketPayloadType
+} from "./phoenix-socket";
 
 function isBinary(data: MessageToSocket<SocketPayloadType>): data is MessageToSocket<ArrayBuffer> {
   return data.payload instanceof ArrayBuffer;
 }
-
-
 export class PhoenixSerializer {
   private HEADER_LENGTH: number;
   private META_LENGTH: number;
