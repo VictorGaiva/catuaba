@@ -1,7 +1,12 @@
 import { v4 as uuid } from "uuid";
 import { Observable, PartialObserver, } from "rxjs";
 import { filter, map } from "rxjs/operators";
-import { BroadcastSocketMessage, isBroadcastMessage, isPushMessage, isReplyMessage, MessageFromSocket, MessageToSocket, PhoenixSocket, PushSocketMessage, ReplySocketMessage, SocketPayloadType } from "./phoenix-socket";
+import {
+  BroadcastSocketMessage, isBroadcastMessage, isPushMessage,
+  isReplyMessage, MessageFromSocket, MessageToSocket,
+  PhoenixSocket, PushSocketMessage, ReplySocketMessage,
+  SocketPayloadType
+} from "./socket";
 
 export enum CHANNEL_STATE {
   closed = "closed",
@@ -11,10 +16,10 @@ export enum CHANNEL_STATE {
   leaving = "leaving",
 }
 
-const TRANSPORTS = {
-  longpoll: "longpoll",
-  websocket: "websocket",
-};
+// const TRANSPORTS = {
+//   longpoll: "longpoll",
+//   websocket: "websocket",
+// };
 
 export enum CHANNEL_EVENT {
   phx_close = "phx_close",
@@ -46,56 +51,21 @@ export function isPushChannelMessage<T extends SocketPayloadType>(data: ChannelM
 }
 
 export class PhoenixChannel<R extends SocketPayloadType = SocketPayloadType, S extends SocketPayloadType = SocketPayloadType> {
-  private join_ref: string;
-  private topic: string;
-  private sequence: number;
-  private _state: CHANNEL_STATE;
-
-  private socket: PhoenixSocket<R, S>;
+  private join_ref: string | undefined;
+  private sequence: number = 1;
+  private _state: CHANNEL_STATE = CHANNEL_STATE.closed;
 
   private $rawData: Observable<MessageFromSocket<R>>;
   private $mappedData: Observable<ChannelMessage<R>>;
 
-  private controlSequences: { event: CHANNEL_EVENT; ref: string }[];
+  private controlSequences: { event: CHANNEL_EVENT; ref: string }[] = [];
 
-  private queue: MessageToSocket<S>[]
+  private queue: MessageToSocket<S>[] = [];
 
-  constructor(topic: string, socket: PhoenixSocket<R, S>) {
-    this.sequence = 1;
-    this.topic = topic;
-    this._state = CHANNEL_STATE.closed;
-    this.controlSequences = [];
-    this.queue = [];
-
-    this.socket = socket;
-
+  constructor(private topic: string, private socket: PhoenixSocket<R, S>) {
     // Messages for this Channel
     this.$rawData = new Observable<MessageFromSocket<R>>(subscriber => this.socket.subscribe(subscriber)).pipe(
       filter(({ topic }) => topic === this.topic),
-    );
-
-    this.$mappedData = this.$rawData.pipe(
-      map(
-        (message) => {
-          if (isPushMessage(message))
-            return {
-              event: message.event,
-              payload: message.payload,
-              type: "push"
-            }
-          if (isBroadcastMessage(message))
-            return {
-              event: message.event,
-              payload: message.payload,
-              type: "broadcast"
-            }
-          if (isReplyMessage(message))
-            return {
-              event: message.event,
-              payload: message.payload,
-              type: "reply"
-            }
-        })
     );
 
     // Controller
@@ -109,7 +79,29 @@ export class PhoenixChannel<R extends SocketPayloadType = SocketPayloadType, S e
       next: () => { },
     });
 
-    // Join the channel
+    this.$mappedData = this.$rawData.pipe(
+      map<MessageFromSocket<R>, ChannelMessage<R>>(
+        (message) => {
+          if (isPushMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: "push"
+            }
+          else if (isBroadcastMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: "broadcast"
+            }
+          else //if (isReplyMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: "reply"
+            }
+        })
+    );
   }
 
   get state() {
@@ -134,8 +126,10 @@ export class PhoenixChannel<R extends SocketPayloadType = SocketPayloadType, S e
         if (result.payload.status === "ok") {
           this._state = CHANNEL_STATE.joined;
 
-          let queued: MessageToSocket<S>;
-          while (queued = this.queue.pop()) { this.send(queued); }
+          for (const queued of this.queue) {
+            this.send(queued);
+          }
+          this.queue = [];
         }
         else console.log(result);
       } catch (err) {
@@ -206,7 +200,7 @@ export class PhoenixChannel<R extends SocketPayloadType = SocketPayloadType, S e
         this._state = CHANNEL_STATE.leaving;
         break;
     }
-    this.send({ event, join_ref: this.join_ref, ref, payload, topic: this.topic });
+    this.send({ event, join_ref: this.join_ref, ref, payload: payload ?? {} as S, topic: this.topic });
     return response;
   }
 

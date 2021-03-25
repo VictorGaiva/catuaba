@@ -1,7 +1,6 @@
 import { PartialObserver, Subject, } from "rxjs";
-import { PhoenixChannel } from "./phoenix-channel";
-import { PhoenixSerializer } from "./phoenix-serializer";
-
+import { PhoenixChannel } from "./channel";
+import { PhoenixSerializer } from "./serializer";
 
 export enum MESSAGE_KIND {
   push = 0,
@@ -37,7 +36,7 @@ export type MessageFromSocket<T extends SocketPayloadType = ArrayBuffer> =
   | BroadcastSocketMessage<T>;
 
 export type MessageToSocket<T extends SocketPayloadType> = {
-  join_ref: string;
+  join_ref?: string;
   ref: string;
   topic: string;
   event: string;
@@ -60,32 +59,31 @@ export function isBroadcastMessage<T extends SocketPayloadType>(data: MessageFro
   return (join_ref === undefined || join_ref === null) && (ref === undefined || ref === null);
 }
 
-const DEFAULT_VSN = "2.0.0";
-const DEFAULT_TIMEOUT = 10000;
-const WS_CLOSE_NORMAL = 1000;
+// const DEFAULT_VSN = "2.0.0";
+// const DEFAULT_TIMEOUT = 10000;
+// const WS_CLOSE_NORMAL = 1000;
 
 export class PhoenixSocket<R extends SocketPayloadType = SocketPayloadType, S extends SocketPayloadType = SocketPayloadType> {
   private socket: WebSocket;
-  private subject: Subject<MessageFromSocket<R>>;
+  private subject: Subject<MessageFromSocket<R>> = new Subject();
 
   private heartbeatChannel: PhoenixChannel<R, S>;
-  private heartbeatTimer: NodeJS.Timeout;
-  private heartbeatPromise: Promise<void> | null;
+  private heartbeatTimer: NodeJS.Timeout | undefined;
+  private heartbeatPromise: Promise<void> | undefined;
 
-  private queue: MessageToSocket<S>[];
+  private queue: MessageToSocket<S>[] = [];
 
-  private serializer: PhoenixSerializer;
+  private serializer: PhoenixSerializer = new PhoenixSerializer();
 
   constructor({ url, protocols }: { url: string; protocols?: string | string[] }) {
     this.socket = new WebSocket(url, protocols);
-    this.subject = new Subject();
-    this.serializer = new PhoenixSerializer();
-    this.queue = [];
+
     // No need to join the channel for heartbeats
     this.heartbeatChannel = new PhoenixChannel<R, S>("phoenix", this);
 
-    this.socket.addEventListener("close", (e) => {
-      clearInterval(this.heartbeatTimer);
+    this.socket.addEventListener("close", () => {
+      if (this.heartbeatTimer)
+        clearInterval(this.heartbeatTimer);
       this.subject.complete();
     });
 
@@ -101,7 +99,8 @@ export class PhoenixSocket<R extends SocketPayloadType = SocketPayloadType, S ex
       this.heartbeatTimer = setInterval(() => {
         if (this.heartbeatPromise !== undefined) {
           this.subject.error(e);
-          clearInterval(this.heartbeatTimer)
+          if (this.heartbeatTimer)
+            clearInterval(this.heartbeatTimer);
         }
         else {
           this.heartbeatPromise = this.heartbeatChannel.run("heartbeat", {} as S, { force: true }).then(result => {
@@ -112,14 +111,17 @@ export class PhoenixSocket<R extends SocketPayloadType = SocketPayloadType, S ex
           })
         }
       }, 30000);
-      let queued: MessageToSocket<S>;
-      while (queued = this.queue.pop()) { this.send(queued); }
+      for (const queued of this.queue) {
+        this.send(queued);
+      }
+      this.queue = [];
     })
 
     // Todo: Reconnecting attempt
     this.socket.addEventListener("error", (e) => {
       this.subject.error(e);
-      clearInterval(this.heartbeatTimer)
+      if (this.heartbeatTimer)
+        clearInterval(this.heartbeatTimer);
     });
   }
 

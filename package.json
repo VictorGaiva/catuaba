@@ -1,11 +1,39 @@
 {
-  "name": "catuaba",
-  "version": "0.0.1",
-  "description": "A Typescript Client for Elixir's Phoenix Channel, using RxJS patterns.",
-  "main": "src/index.ts",
-  "scripts": {
-    "test": "jest"
+  "version": "0.1.0",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "typings": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=10"
   },
+  "scripts": {
+    "start": "tsdx watch",
+    "build": "tsdx build",
+    "test": "tsdx test",
+    "lint": "tsdx lint",
+    "prepare": "tsdx build",
+    "size": "size-limit",
+    "analyze": "size-limit --why"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "tsdx lint"
+    }
+  },
+  "prettier": {
+    "printWidth": 120,
+    "semi": true,
+    "singleQuote": true,
+    "trailingComma": "es5"
+  },
+  "name": "catuaba",
+  "description": "A Typescript Client for Elixir's Phoenix Channels and Absinthe, using RxJS patterns.",
+  "author": "Victor Gaiva",
+  "module": "dist/catuaba.esm.js",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/VictorGaiva/catuaba.git"
@@ -19,24 +47,33 @@
     "websocket",
     "absinthe"
   ],
-  "author": "VictorGaiva",
-  "license": "MIT",
   "bugs": {
     "url": "https://github.com/VictorGaiva/catuaba/issues"
   },
   "homepage": "https://github.com/VictorGaiva/catuaba#readme",
-  "dependencies": {
-    "@apollo/client": "^3.3.12",
-    "@types/node": "^14.14.35",
-    "rxjs": "^7.0.0-beta.13",
-    "typescript": "^4.2.3",
-    "uuid": "^8.3.2",
-    "zen-observable": "^0.8.15"
-  },
+  "size-limit": [
+    {
+      "path": "dist/catuaba.cjs.production.min.js",
+      "limit": "10 KB"
+    },
+    {
+      "path": "dist/catuaba.esm.js",
+      "limit": "10 KB"
+    }
+  ],
   "devDependencies": {
-    "@types/uuid": "^8.3.0"
+    "@size-limit/preset-small-lib": "^4.10.1",
+    "@types/uuid": "^8.3.0",
+    "husky": "^5.2.0",
+    "size-limit": "^4.10.1",
+    "tsdx": "^0.14.1",
+    "tslib": "^2.1.0",
+    "typescript": "^4.2.3"
   },
-  "prettier": {
-    "printWidth": 120
+  "dependencies": {
+    "@apollo/client": "^3.3.13",
+    "rxjs": "^7.0.0-beta.13",
+    "uuid": "^3.4.0",
+    "zen-observable": "^0.8.15"
   }
 }
