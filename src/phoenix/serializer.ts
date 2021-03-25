@@ -28,7 +28,7 @@ export class PhoenixSerializer {
     return { join_ref, ref, topic, event, payload }
   }
 
-  private binaryEncode({ join_ref, ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
+  private binaryEncode({ join_ref = "", ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
     const metaLength = this.META_LENGTH + join_ref.length + ref.length + topic.length + event.length;
     const header = new ArrayBuffer(this.HEADER_LENGTH + metaLength);
     const view = new DataView(header);
@@ -63,6 +63,8 @@ export class PhoenixSerializer {
         return this.decodeReply(buffer, view, decoder);
       case MESSAGE_KIND.broadcast:
         return this.decodeBroadcast(buffer, view, decoder);
+      default:
+        return "" as never;
     }
   }
 

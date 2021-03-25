@@ -87,7 +87,7 @@ export class PhoenixSocket<R extends SocketPayloadType = SocketPayloadType, S ex
       this.subject.complete();
     });
 
-    this.socket.addEventListener("message", (e: MessageEvent<RawSocketMessage>) => {
+    this.socket.addEventListener("message", (e) => {
       try {
         this.subject.next(this.serializer.decode(e.data));
       } catch (err) {
