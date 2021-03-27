@@ -1,26 +1,29 @@
 # Catuaba
 
 ## Description
-A Typescript Client for connecting and interacting with Elixir's [Phoenix-Channels](https://hexdocs.pm/phoenix/channels.html), using [RxJS](https://rxjs-dev.firebaseapp.com/guide/overview)'s API.
+A Typescript Client for connecting and interacting with Elixir's [Phoenix-Channels](https://hexdocs.pm/phoenix/channels.html) and [Absinthe](https://github.com/absinthe-graphql/absinthe), using [RxJS](https://rxjs-dev.firebaseapp.com/guide/overview)'s API.
 
 ## Motivation
-Typescript is becoming a _de facto_ standard for Front-end Development, being already adopted or  supported by most of Javascript Front-end Frameworks. This project aims help quickstart the creation of a set of tools that interact with the Elixir ecosystem using modern and robust tools, while also providing extensibility maintainability.
+Typescript is becoming a _de facto_ standard for Front-end Development, being already adopted or  supported by most of Javascript Front-end Frameworks. This project aims to help quickstart an ecosystem of Typescript tools for interacting with the Elixir's ecosystem, while being extensible and maintainable.
 
 
 ## Features
 
 ### Done
-- [x] Join and leave channels
-- [x] Send and receive messages
-- [x] Handle Push, Reply and Broadcast message types
-- [x] Decode binary messages (pending validation since it was directly ported from https://github.com/mcampa/phoenix-channels)
-- [x] Heartbeats
-- [x] Queues
+- Join and leave channels
+- Send messages
+- Subscribe to incomings messages
+- Handle Phoenix's Push, Reply and Broadcast message types
+- Send a message and receive a Promise that resolves to the Reply of this message
+- Decode binary messages (pending validation since it was directly ported from https://github.com/mcampa/phoenix-channels)
+- Heartbeats to maintain the WebSocket and Phoenix Channel connection alive
+- Message Queues for Socket and Channels
+- Force sending messages to a channel before being joined
 
 ### Todo
-- [ ] Timeout
-- [ ] Validate the protocol
-- [ ] Validate payload types
-- [ ] Implement 'longpoll'
-- [ ] Tests
-- [ ] Documentation
+- Timeout and reconnection
+- Validate the protocol
+- Validate payload types
+- Implement 'longpoll'
+- Tests
+- Documentation
