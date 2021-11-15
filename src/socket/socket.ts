@@ -5,7 +5,7 @@ import { PartialObserver, Subject } from 'rxjs';
 // const WS_CLOSE_NORMAL = 1000;
 
 type SocketOptions<Send, Receive> = {
-  url: string;
+  url: string | (() => string);
   protocols?: string | string[];
   decoder: (data: any) => Receive;
   encoder: (data: Send) => any;
@@ -21,41 +21,72 @@ export class PhoenixSocket<Send, Receive> {
   private interval?: number;
   private timeout?: number;
   private runner?: () => Promise<void> | void;
+  private backoff = 100;
+  private reconnecting = false;
 
   public hasRunner = false;
 
   private queue: Send[] = [];
 
-  constructor({ url, protocols, decoder, encoder }: SocketOptions<Send, Receive>) {
-    this.socket = new WebSocket(url, protocols);
-    this.decoder = decoder;
-    this.encoder = encoder;
+  constructor(private opts: SocketOptions<Send, Receive>) {
+    const url = typeof opts.url === 'function' ? opts.url() : opts.url;
+    this.socket = new WebSocket(url, opts.protocols);
+    this.decoder = opts.decoder;
+    this.encoder = opts.encoder;
 
-    this.socket.addEventListener('close', () => {
-      if (this.timer) clearTimeout(this.timer);
-      this.subject.complete();
-    });
+    this.socket.addEventListener('close', this.onClose.bind(this));
+    this.socket.addEventListener('open', this.onOpen.bind(this));
+  }
 
-    this.socket.addEventListener('message', e => {
-      try {
-        this.subject.next(this.decoder(e.data));
-      } catch (err) {
-        this.subject.error(err);
-      }
-    });
+  private async onClose(_: Event) {
+    this.reconnecting = false;
+    if (this.timer) clearTimeout(this.timer);
+    // Reconnect
+    if (this.socket.readyState === WebSocket.CLOSED) {
+      this.backoff = Math.min(this.backoff * 2, 8000);
+      setTimeout(() => this.reconnect(), this.backoff);
+    }
+  }
 
-    this.socket.addEventListener('open', () => {
-      for (const queued of this.queue) {
-        this.send(queued);
-      }
-      this.queue = [];
-    });
+  private onOpen(_: Event) {
+    this.reconnecting = false;
+    this.queue.forEach(queued => this.send(queued));
+    this.queue = [];
 
-    // Todo: Reconnecting attempt
-    this.socket.addEventListener('error', e => {
+    if (this.hasRunner && !this.timer) {
+      this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
+    }
+
+    this.socket.addEventListener('error', this.onError.bind(this));
+    this.socket.addEventListener('message', this.onMessage.bind(this));
+  }
+
+  private onError(e: Event) {
+    if (this.timer) clearInterval(this.timer);
+
+    if (this.socket.readyState !== WebSocket.CLOSED) {
       this.subject.error(e);
-      if (this.timer) clearInterval(this.timer);
-    });
+    }
+  }
+
+  private onMessage(e: MessageEvent) {
+    this.reconnecting = false;
+    try {
+      this.subject.next(this.decoder(e.data));
+    } catch (err) {
+      this.subject.error(err);
+    }
+  }
+
+  private reconnect() {
+    if (!this.reconnecting) {
+      const url = typeof this.opts.url === 'function' ? this.opts.url() : this.opts.url;
+
+      this.socket = new WebSocket(url, this.opts.protocols);
+      this.socket.addEventListener('close', this.onClose.bind(this));
+      this.socket.addEventListener('open', this.onOpen.bind(this));
+      this.reconnecting = true;
+    }
   }
 
   subscribe(observer: PartialObserver<Receive>) {
@@ -70,14 +101,14 @@ export class PhoenixSocket<Send, Receive> {
     }
   }
 
-  private async heartbeat(backoff = 25) {
+  private async heartbeat(backoff = 100) {
     if (this.runner) {
       try {
         await Promise.race([this.runner(), new Promise((_, rej) => setTimeout(rej, this.timeout))]);
         this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
       } catch (err) {
         this.timer = (setTimeout(
-          () => this.heartbeat(Math.min(backoff * 2, 1600)),
+          () => this.heartbeat(Math.min(backoff * 2, 8000)),
           this.interval
         ) as unknown) as number;
       }
