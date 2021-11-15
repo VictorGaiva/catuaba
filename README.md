@@ -10,20 +10,20 @@ Typescript is becoming a _de facto_ standard for Front-end Development, being al
 ## Features
 
 ### Done
-- Join and leave channels
-- Send messages
-- Subscribe to incomings messages
-- Handle Phoenix's Push, Reply and Broadcast message types
-- Send a message and receive a Promise that resolves to the Reply of this message
-- Decode binary messages (pending validation since it was directly ported from https://github.com/mcampa/phoenix-channels)
-- Heartbeats to maintain the WebSocket and Phoenix Channel connection alive
-- Message Queues for Socket and Channels
-- Force sending messages to a channel before being joined
+- [x] Join and leave channels
+- [x] Send messages
+- [x] Subscribe to incomings messages
+- [x] Handle Phoenix's Push, Reply and Broadcast message types
+- [x] Send a message and receive a Promise that resolves to the Reply of this message
+- [x] Decode binary messages (pending validation since it was directly ported from https://github.com/mcampa/phoenix-channels)
+- [x] Heartbeats to maintain the WebSocket and Phoenix Channel connection alive
+- [x] Message Queues for Socket and Channels
+- [x] Force sending messages to a channel before being joined
 
 ### Todo
-- Timeout and reconnection
-- Validate the protocol
-- Validate payload types
-- Implement 'longpoll'
-- Tests
-- Documentation
+- [ ] Timeout and reconnection
+- [ ] Validate the protocol
+- [ ] Validate payload types
+- [ ] Implement 'longpoll'
+- [ ] Tests
+- [ ] Documentation
