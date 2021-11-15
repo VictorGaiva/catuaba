@@ -1,9 +1,13 @@
-import { CHANNEL_EVENT } from "./channel";
 import {
-  BroadcastSocketMessage, MessageFromSocket, MessageToSocket,
-  MESSAGE_KIND, PushSocketMessage, RawSocketMessage,
-  ReplySocketMessage, SocketPayloadType
-} from "./socket";
+  BroadcastSocketMessage,
+  MessageFromSocket,
+  MessageToSocket,
+  MESSAGE_KIND,
+  PushSocketMessage,
+  RawSocketMessage,
+  ReplySocketMessage,
+  SocketPayloadType,
+} from '../socket/types';
 
 function isBinary(data: MessageToSocket<SocketPayloadType>): data is MessageToSocket<ArrayBuffer> {
   return data.payload instanceof ArrayBuffer;
@@ -13,22 +17,22 @@ export class PhoenixSerializer {
   private META_LENGTH: number = 4;
 
   encode<T>(data: MessageToSocket<T>) {
-    return isBinary(data) ? this.binaryEncode(data) : JSON.stringify([
-      data.join_ref, data.ref, data.topic, data.event, data.payload
-    ]);
+    return isBinary(data)
+      ? this.binaryEncode(data)
+      : JSON.stringify([data.join_ref, data.ref, data.topic, data.event, data.payload]);
   }
 
   // TODO: fix typing
   decode<T>(data: RawSocketMessage): MessageFromSocket<T> {
     if (data instanceof ArrayBuffer) {
       //@ts-ignore
-      return this.binaryDecode(data)
+      return this.binaryDecode(data);
     }
     const [join_ref, ref, topic, event, payload] = JSON.parse(data);
-    return { join_ref, ref, topic, event, payload }
+    return { join_ref, ref, topic, event, payload };
   }
 
-  private binaryEncode({ join_ref = "", ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
+  private binaryEncode({ join_ref = '', ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
     const metaLength = this.META_LENGTH + join_ref.length + ref.length + topic.length + event.length;
     const header = new ArrayBuffer(this.HEADER_LENGTH + metaLength);
     const view = new DataView(header);
@@ -40,10 +44,10 @@ export class PhoenixSerializer {
     view.setUint8(offset++, topic.length);
     view.setUint8(offset++, event.length);
 
-    Array.from(join_ref, (char) => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(ref, (char) => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(topic, (char) => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(event, (char) => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(join_ref, char => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(ref, char => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(topic, char => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(event, char => view.setUint8(offset++, char.charCodeAt(0)));
 
     let combined = new Uint8Array(header.byteLength + payload.byteLength);
     combined.set(new Uint8Array(header), 0);
@@ -64,7 +68,7 @@ export class PhoenixSerializer {
       case MESSAGE_KIND.broadcast:
         return this.decodeBroadcast(buffer, view, decoder);
       default:
-        return "" as never;
+        return '' as never;
     }
   }
 
@@ -104,7 +108,7 @@ export class PhoenixSerializer {
 
     const data = buffer.slice(offset, buffer.byteLength);
 
-    return { join_ref, ref, topic, event: CHANNEL_EVENT.phx_reply, payload: { status: event, response: data } };
+    return { join_ref, ref, topic, event: 'phx_reply', payload: { status: event, response: data } };
   }
 
   private decodeBroadcast(
