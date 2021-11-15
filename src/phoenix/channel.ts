@@ -2,6 +2,7 @@ import { v4 as uuid } from 'uuid';
 import { Observable, PartialObserver } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import {
+  BroadcastChannelMessage,
   ChannelEvent,
   ChannelMessage,
   ChannelRunOpts,
@@ -16,6 +17,8 @@ import {
 } from './types';
 import { PhoenixSocket } from '../socket/socket';
 
+type ChannelOptions = { topic: string; broadcast?: false | undefined } | { broadcast: true };
+
 export class PhoenixChannel<Send, Receive> {
   private join_ref: string | undefined;
   private sequence: number = 1;
@@ -28,11 +31,55 @@ export class PhoenixChannel<Send, Receive> {
 
   private queue: MessageToSocket<Send>[] = [];
 
-  constructor(private topic: string, private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Receive>>) {
-    // Messages for this Channel
-    this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
-      filter(({ topic }) => topic === this.topic)
-    );
+  private topic?: string;
+  public isReadOnly: boolean;
+
+  constructor(
+    private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Receive>>,
+    options: ChannelOptions
+  ) {
+    if (options.broadcast) {
+      this.isReadOnly = true;
+      this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
+        filter(({ topic }) => topic === this.topic)
+      );
+
+      this.$mappedData = this.$rawData.pipe(
+        map<MessageFromSocket<Receive>, ChannelMessage<Receive>>(message => {
+          if (isPushMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: 'push',
+            };
+          else if (isBroadcastMessage(message))
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: 'broadcast',
+              topic: message.topic,
+            };
+          else
+            return {
+              event: message.event,
+              payload: message.payload,
+              type: 'reply',
+            };
+        })
+      );
+    } else {
+      this.topic = options.topic;
+      this.isReadOnly = true;
+      this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
+        filter(isBroadcastMessage)
+      );
+
+      this.$mappedData = this.$rawData.pipe(
+        map<MessageFromSocket<Receive>, BroadcastChannelMessage<Receive>>(
+          ({ event, payload }) => ({ event, payload, type: 'broadcast' } as BroadcastChannelMessage<Receive>)
+        )
+      );
+    }
 
     // Controller
     this.$rawData.subscribe({
@@ -44,37 +91,14 @@ export class PhoenixChannel<Send, Receive> {
       },
       next: () => {},
     });
-
-    this.$mappedData = this.$rawData.pipe(
-      map<MessageFromSocket<Receive>, ChannelMessage<Receive>>(message => {
-        if (isPushMessage(message))
-          return {
-            event: message.event,
-            payload: message.payload,
-            type: 'push',
-          };
-        else if (isBroadcastMessage(message))
-          return {
-            event: message.event,
-            payload: message.payload,
-            type: 'broadcast',
-          };
-        else
-          return {
-            event: message.event,
-            payload: message.payload,
-            type: 'reply',
-          };
-      })
-    );
   }
 
   get state() {
     return `${this._state}`;
   }
 
-  subscribe(observer: PartialObserver<ChannelMessage<Receive>>) {
-    return this.$mappedData.subscribe(observer);
+  subscribe<T extends ChannelMessage<Receive> = ChannelMessage<Receive>>(observer: PartialObserver<T>) {
+    return this.$mappedData.subscribe(observer as any);
   }
 
   toObservable() {
@@ -85,9 +109,12 @@ export class PhoenixChannel<Send, Receive> {
    * Joins the channel, returning a promise that resolves when the channel is joined.
    */
   async join() {
-    this.join_ref = uuid();
+    if (this.isReadOnly) {
+      throw new Error('Cannot join Broadcast channel');
+    }
 
     if (this._state !== 'joined') {
+      this.join_ref = uuid();
       this._state = 'joining';
       try {
         const result = await this.runCommand('phx_join');
@@ -127,6 +154,9 @@ export class PhoenixChannel<Send, Receive> {
    * @param payload The payload to send
    */
   next(event: string, payload: Send) {
+    if (this.topic === undefined || this.isReadOnly) {
+      throw new Error('Cannot send data to Broadcast channel');
+    }
     if (this._state === 'joined')
       this.send({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
     else this.queue.push({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
@@ -139,6 +169,9 @@ export class PhoenixChannel<Send, Receive> {
    * @param options Options for the command.
    */
   async run(event: string, payload: Send, opts?: ChannelRunOpts) {
+    if (this.topic === undefined || this.isReadOnly) {
+      throw new Error('Cannot send data to Broadcast channel');
+    }
     const { force = false } = opts ?? {};
     // Keep the sequence within the scope
     const ref = `${this.sequence++}`;
@@ -184,6 +217,9 @@ export class PhoenixChannel<Send, Receive> {
    * Send the command to the socket
    */
   private async runCommand(event: 'phx_join' | 'phx_leave', payload?: Send) {
+    if (this.topic === undefined || this.isReadOnly) {
+      throw new Error('Cannot send data to Broadcast channel');
+    }
     // Keep the sequence within the scope
     const ref = `${this.sequence++}`;
 

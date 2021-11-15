@@ -58,7 +58,7 @@ export type ReplyChannelMessage<R extends SocketPayloadType> = Pick<ReplySocketM
 };
 export type BroadcastChannelMessage<R extends SocketPayloadType> = Pick<
   BroadcastSocketMessage<R>,
-  'event' | 'payload'
+  'event' | 'payload' | 'topic'
 > & { type: 'broadcast' };
 export type PushChannelMessage<R extends SocketPayloadType> = Pick<PushSocketMessage<R>, 'event' | 'payload'> & {
   type: 'push';
