@@ -45,8 +45,6 @@ export class PhoenixSocket<Send, Receive> {
     });
 
     this.socket.addEventListener('open', () => {
-      this.resetHeartbeat();
-
       for (const queued of this.queue) {
         this.send(queued);
       }
@@ -72,13 +70,6 @@ export class PhoenixSocket<Send, Receive> {
     }
   }
 
-  private async resetHeartbeat() {
-    if (this.interval && this.runner) {
-      if (this.timer) clearTimeout(this.timer);
-      this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
-    }
-  }
-
   private async heartbeat(backoff = 25) {
     if (this.runner) {
       try {
@@ -98,6 +89,6 @@ export class PhoenixSocket<Send, Receive> {
     this.interval = interval;
     this.runner = runner;
     this.timeout = timeout;
-    this.resetHeartbeat();
+    this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
   }
 }
