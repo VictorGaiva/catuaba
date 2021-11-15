@@ -27,12 +27,10 @@ export class PhoenixChannel<Send, Receive> {
   private $rawData: Observable<MessageFromSocket<Receive>>;
   private $mappedData: Observable<ChannelMessage<Receive>>;
 
-  private controlSequences: { event: ChannelEvent; ref: string }[] = [];
-
   private queue: MessageToSocket<Send>[] = [];
 
   private topic?: string;
-  public isReadOnly: boolean;
+  public isReadOnly: boolean = false;
 
   constructor(
     private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Receive>>,
@@ -40,6 +38,17 @@ export class PhoenixChannel<Send, Receive> {
   ) {
     if (options.broadcast) {
       this.isReadOnly = true;
+      this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
+        filter(isBroadcastMessage)
+      );
+
+      this.$mappedData = this.$rawData.pipe(
+        map<MessageFromSocket<Receive>, BroadcastChannelMessage<Receive>>(
+          ({ event, payload }) => ({ event, payload, type: 'broadcast' } as BroadcastChannelMessage<Receive>)
+        )
+      );
+    } else {
+      this.topic = options.topic;
       this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
         filter(({ topic }) => topic === this.topic)
       );
@@ -67,18 +76,6 @@ export class PhoenixChannel<Send, Receive> {
             };
         })
       );
-    } else {
-      this.topic = options.topic;
-      this.isReadOnly = true;
-      this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
-        filter(isBroadcastMessage)
-      );
-
-      this.$mappedData = this.$rawData.pipe(
-        map<MessageFromSocket<Receive>, BroadcastChannelMessage<Receive>>(
-          ({ event, payload }) => ({ event, payload, type: 'broadcast' } as BroadcastChannelMessage<Receive>)
-        )
-      );
     }
 
     // Controller
@@ -94,7 +91,7 @@ export class PhoenixChannel<Send, Receive> {
 
     if (!this.socket.hasRunner) {
       this.socket.registerHeartbeatRunner(30000, 1000, async () => {
-        await this.run('heartbeat', {} as Send);
+        await this.runCommand('heartbeat', {} as Send);
       });
     }
   }
@@ -126,10 +123,7 @@ export class PhoenixChannel<Send, Receive> {
         const result = await this.runCommand('phx_join');
         if (result.payload.status === 'ok') {
           this._state = 'joined';
-
-          for (const queued of this.queue) {
-            this.send(queued);
-          }
+          this.queue.forEach(queued => this.send(queued));
           this.queue = [];
         } else console.log(result);
       } catch (err) {
@@ -189,7 +183,7 @@ export class PhoenixChannel<Send, Receive> {
       this.$rawData.subscribe({
         error: err => rej(err),
         complete: () => {
-          if (!resolved) rej(`Subscription unexpectedly completed before receiving reponse.`);
+          if (!resolved) rej('Subscription unexpectedly completed before receiving reponse.');
         },
         next: data => {
           if (isReplyMessage(data)) {
@@ -222,15 +216,12 @@ export class PhoenixChannel<Send, Receive> {
   /**
    * Send the command to the socket
    */
-  private async runCommand(event: 'phx_join' | 'phx_leave', payload?: Send) {
+  private async runCommand(event: 'phx_join' | 'phx_leave' | 'heartbeat', payload?: Send) {
     if (this.topic === undefined || this.isReadOnly) {
       throw new Error('Cannot send data to Broadcast channel');
     }
     // Keep the sequence within the scope
     const ref = `${this.sequence++}`;
-
-    // Add to control sequence tracker
-    this.controlSequences.push({ event, ref: ref });
 
     // Start the subscription
     const response = new Promise<ReplySocketMessage<Receive>>((res, rej) => {
@@ -263,7 +254,13 @@ export class PhoenixChannel<Send, Receive> {
         this._state = 'leaving';
         break;
     }
-    this.send({ event, join_ref: this.join_ref, ref, payload: payload ?? ({} as Send), topic: this.topic });
+    this.send({
+      event,
+      join_ref: this.join_ref,
+      ref,
+      payload: payload ?? ({} as Send),
+      topic: event === 'heartbeat' ? 'phoenix' : this.topic,
+    });
     return response;
   }
 }
