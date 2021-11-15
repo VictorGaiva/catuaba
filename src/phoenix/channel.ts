@@ -1,17 +1,21 @@
 import { v4 as uuid } from 'uuid';
 import { Observable, PartialObserver } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
-import { ChannelEvent, ChannelMessage, ChannelRunOpts, ChannelState, ReplyChannelMessage } from './types';
 import {
+  ChannelEvent,
+  ChannelMessage,
+  ChannelRunOpts,
+  ChannelState,
   isBroadcastMessage,
   isPushMessage,
   isReplyMessage,
   MessageFromSocket,
   MessageToSocket,
+  ReplyChannelMessage,
   ReplySocketMessage,
-  SocketPayloadType,
-} from '../socket/types';
-import { PhoenixSocket } from '..';
+} from './types';
+import { SocketPayloadType } from '../socket/types';
+import { PhoenixSocket } from '../socket/socket';
 
 export class PhoenixChannel<
   R extends SocketPayloadType = SocketPayloadType,
@@ -28,7 +32,7 @@ export class PhoenixChannel<
 
   private queue: MessageToSocket<S>[] = [];
 
-  constructor(private topic: string, private socket: PhoenixSocket<R, S>) {
+  constructor(private topic: string, private socket: PhoenixSocket<MessageFromSocket<R>, MessageToSocket<S>>) {
     // Messages for this Channel
     this.$rawData = new Observable<MessageFromSocket<R>>(subscriber => this.socket.subscribe(subscriber)).pipe(
       filter(({ topic }) => topic === this.topic)

@@ -1,29 +1,34 @@
 import { PartialObserver, Subject } from 'rxjs';
-import { PhoenixSerializer } from '../phoenix/serializer';
-import { MessageFromSocket, MessageToSocket, SocketPayloadType } from './types';
+import { SocketPayloadType } from './types';
 
 // const DEFAULT_VSN = "2.0.0";
 // const DEFAULT_TIMEOUT = 10000;
 // const WS_CLOSE_NORMAL = 1000;
 
-export class PhoenixSocket<
-  R extends SocketPayloadType = SocketPayloadType,
-  S extends SocketPayloadType = SocketPayloadType
-> {
+type SocketOptions<R, S> = {
+  url: string;
+  protocols?: string | string[];
+  decoder: (data: any) => R;
+  encoder: (data: S) => SocketPayloadType;
+};
+
+export class PhoenixSocket<R, S> {
   private socket: WebSocket;
-  private subject: Subject<MessageFromSocket<R>> = new Subject();
+  private subject: Subject<R> = new Subject();
+  private decoder: (data: any) => R;
+  private encoder: (data: S) => SocketPayloadType;
 
   private timer?: number;
   private interval?: number;
   private timeout?: number;
   private runner?: (socket: PhoenixSocket<R, S>) => Promise<void> | void;
 
-  private queue: MessageToSocket<S>[] = [];
+  private queue: S[] = [];
 
-  private serializer: PhoenixSerializer = new PhoenixSerializer();
-
-  constructor({ url, protocols }: { url: string; protocols?: string | string[] }) {
+  constructor({ url, protocols, decoder, encoder }: SocketOptions<R, S>) {
     this.socket = new WebSocket(url, protocols);
+    this.decoder = decoder;
+    this.encoder = encoder;
 
     this.socket.addEventListener('close', () => {
       if (this.timer) clearTimeout(this.timer);
@@ -32,7 +37,7 @@ export class PhoenixSocket<
 
     this.socket.addEventListener('message', e => {
       try {
-        this.subject.next(this.serializer.decode(e.data));
+        this.subject.next(this.decoder(e.data));
       } catch (err) {
         this.subject.error(err);
       }
@@ -54,15 +59,15 @@ export class PhoenixSocket<
     });
   }
 
-  subscribe(observer: PartialObserver<MessageFromSocket<R>>) {
+  subscribe(observer: PartialObserver<R>) {
     return this.subject.subscribe(observer);
   }
 
-  send(data: MessageToSocket<S>) {
+  send(data: S) {
     if (this.socket.readyState !== WebSocket.OPEN) {
       this.queue.push(data);
     } else {
-      this.socket.send(this.serializer.encode(data));
+      this.socket.send(this.encoder(data) as any);
     }
   }
 
