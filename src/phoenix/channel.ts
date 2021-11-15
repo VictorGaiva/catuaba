@@ -112,25 +112,24 @@ export class PhoenixChannel<Send, Receive> {
     if (this.isReadOnly) {
       throw new Error('Cannot join Broadcast channel');
     }
+    if (this._state === 'joined') return;
 
-    if (this._state !== 'joined') {
-      this.join_ref = uuid();
-      this._state = 'joining';
-      try {
-        const result = await this.runCommand('phx_join');
-        if (result.payload.status === 'ok') {
-          this._state = 'joined';
+    this.join_ref ??= uuid();
+    this._state = 'joining';
+    try {
+      const result = await this.runCommand('phx_join');
+      if (result.payload.status === 'ok') {
+        this._state = 'joined';
 
-          // Once joined, we want to be notified when the socket disconnects and then reconnects, so we can attempt to rejoin.
-          this.socket.addEventListener('disconnected', () => (this._state = 'disconnected'), { once: true });
-          this.socket.addEventListener('reconnected', () => this.join(), { once: true });
+        // Once joined, we want to be notified when the socket disconnects and then reconnects, so we can attempt to rejoin.
+        this.socket.addEventListener('disconnected', () => (this._state = 'disconnected'), { once: true });
+        this.socket.addEventListener('reconnected', () => this.join(), { once: true });
 
-          this.queue.forEach(queued => this.send(queued));
-          this.queue = [];
-        } else console.log(result);
-      } catch (err) {
-        if (err) this._state = 'errored';
+        this.queue.forEach(queued => this.send(queued));
+        this.queue = [];
       }
+    } catch (err) {
+      if (err) this._state = 'errored';
     }
   }
 
@@ -138,15 +137,14 @@ export class PhoenixChannel<Send, Receive> {
    * Leaves the channel, and returns a promise that resolves when the channel has left.
    */
   async leave() {
-    if (this._state === 'joined') {
-      this._state = 'leaving';
-      try {
-        const result = await this.runCommand('phx_leave');
-        if (result.payload.status === 'ok') this._state = 'closed';
-        else console.log(result);
-      } catch (err) {
-        if (err) this._state = 'errored';
-      }
+    if (this._state !== 'joined') return;
+
+    this._state = 'leaving';
+    try {
+      const result = await this.runCommand('phx_leave');
+      if (result.payload.status === 'ok') this._state = 'closed';
+    } catch (err) {
+      if (err) this._state = 'errored';
     }
   }
 

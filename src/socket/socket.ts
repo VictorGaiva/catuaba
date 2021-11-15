@@ -28,10 +28,10 @@ export class PhoenixSocket<Send, Receive> extends EventTarget {
 
   private queue: Send[] = [];
 
-  constructor(private opts: SocketOptions<Send, Receive>) {
+  constructor(private opts: SocketOptions<Send, Receive>, private WebSocketConstructor: typeof WebSocket = WebSocket) {
     super();
     const url = typeof opts.url === 'function' ? opts.url() : opts.url;
-    this.socket = new WebSocket(url, opts.protocols);
+    this.socket = new this.WebSocketConstructor(url, opts.protocols);
     this.decoder = opts.decoder;
     this.encoder = opts.encoder;
 
@@ -87,7 +87,7 @@ export class PhoenixSocket<Send, Receive> extends EventTarget {
     if (!this.reconnecting) {
       const url = typeof this.opts.url === 'function' ? this.opts.url() : this.opts.url;
 
-      this.socket = new WebSocket(url, this.opts.protocols);
+      this.socket = new this.WebSocketConstructor(url, this.opts.protocols);
       this.socket.addEventListener('close', this.onClose.bind(this));
       this.socket.addEventListener('open', this.onOpen.bind(this));
       this.reconnecting = true;
