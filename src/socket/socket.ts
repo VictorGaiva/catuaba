@@ -11,7 +11,7 @@ type SocketOptions<Send, Receive> = {
   encoder: (data: Send) => any;
 };
 
-export class PhoenixSocket<Send, Receive> {
+export class PhoenixSocket<Send, Receive> extends EventTarget {
   private socket: WebSocket;
   private subject: Subject<Receive> = new Subject();
   private decoder: (data: any) => Receive;
@@ -29,6 +29,7 @@ export class PhoenixSocket<Send, Receive> {
   private queue: Send[] = [];
 
   constructor(private opts: SocketOptions<Send, Receive>) {
+    super();
     const url = typeof opts.url === 'function' ? opts.url() : opts.url;
     this.socket = new WebSocket(url, opts.protocols);
     this.decoder = opts.decoder;
@@ -43,13 +44,13 @@ export class PhoenixSocket<Send, Receive> {
     if (this.timer) clearTimeout(this.timer);
     // Reconnect
     if (this.socket.readyState === WebSocket.CLOSED) {
+      this.dispatchEvent(new Event('disconnected'));
       this.backoff = Math.min(this.backoff * 2, 8000);
       setTimeout(() => this.reconnect(), this.backoff);
     }
   }
 
   private onOpen(_: Event) {
-    this.reconnecting = false;
     this.queue.forEach(queued => this.send(queued));
     this.queue = [];
 
@@ -59,6 +60,10 @@ export class PhoenixSocket<Send, Receive> {
 
     this.socket.addEventListener('error', this.onError.bind(this));
     this.socket.addEventListener('message', this.onMessage.bind(this));
+    if (this.reconnecting) {
+      this.reconnecting = false;
+      this.dispatchEvent(new Event('reconnected'));
+    }
   }
 
   private onError(e: Event) {

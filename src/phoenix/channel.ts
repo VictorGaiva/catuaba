@@ -3,7 +3,6 @@ import { Observable, PartialObserver } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import {
   BroadcastChannelMessage,
-  ChannelEvent,
   ChannelMessage,
   ChannelRunOpts,
   ChannelState,
@@ -53,29 +52,7 @@ export class PhoenixChannel<Send, Receive> {
         filter(({ topic }) => topic === this.topic)
       );
 
-      this.$mappedData = this.$rawData.pipe(
-        map<MessageFromSocket<Receive>, ChannelMessage<Receive>>(message => {
-          if (isPushMessage(message))
-            return {
-              event: message.event,
-              payload: message.payload,
-              type: 'push',
-            };
-          else if (isBroadcastMessage(message))
-            return {
-              event: message.event,
-              payload: message.payload,
-              type: 'broadcast',
-              topic: message.topic,
-            };
-          else
-            return {
-              event: message.event,
-              payload: message.payload,
-              type: 'reply',
-            };
-        })
-      );
+      this.$mappedData = this.$rawData.pipe(map(PhoenixChannel.SocketToChannel<Receive>()));
     }
 
     // Controller
@@ -96,8 +73,28 @@ export class PhoenixChannel<Send, Receive> {
     }
   }
 
-  get state() {
-    return `${this._state}`;
+  private static SocketToChannel<Receive>(): (message: MessageFromSocket<Receive>) => ChannelMessage<Receive> {
+    return message => {
+      if (isPushMessage(message))
+        return {
+          event: message.event,
+          payload: message.payload,
+          type: 'push',
+        };
+      else if (isBroadcastMessage(message))
+        return {
+          event: message.event,
+          payload: message.payload,
+          type: 'broadcast',
+          topic: message.topic,
+        };
+      else
+        return {
+          event: message.event,
+          payload: message.payload,
+          type: 'reply',
+        };
+    };
   }
 
   subscribe<T extends ChannelMessage<Receive> = ChannelMessage<Receive>>(observer: PartialObserver<T>) {
@@ -123,6 +120,11 @@ export class PhoenixChannel<Send, Receive> {
         const result = await this.runCommand('phx_join');
         if (result.payload.status === 'ok') {
           this._state = 'joined';
+
+          // Once joined, we want to be notified when the socket disconnects and then reconnects, so we can attempt to rejoin.
+          this.socket.addEventListener('disconnected', () => (this._state = 'disconnected'), { once: true });
+          this.socket.addEventListener('reconnected', () => this.join(), { once: true });
+
           this.queue.forEach(queued => this.send(queued));
           this.queue = [];
         } else console.log(result);

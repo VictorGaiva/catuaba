@@ -49,7 +49,7 @@ export function isBroadcastMessage<T extends SocketPayloadType>(
   return (join_ref === undefined || join_ref === null) && (ref === undefined || ref === null);
 }
 
-export type ChannelState = 'closed' | 'errored' | 'joined' | 'joining' | 'leaving';
+export type ChannelState = 'closed' | 'errored' | 'joined' | 'joining' | 'leaving' | 'disconnected';
 
 export type ChannelEvent = 'phx_reply' | 'phx_error' | 'phx_close' | 'phx_join' | 'phx_leave';
 
