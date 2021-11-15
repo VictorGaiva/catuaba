@@ -1,31 +1,41 @@
-import { FetchResult, Operation } from '@apollo/client';
-import { PhoenixChannel } from '../phoenix/channel';
-import { Observable } from 'rxjs';
-import { v4 as uuid } from 'uuid';
-import { filter, map } from 'rxjs/operators';
 import { print } from 'graphql';
-import { PhoenixSocket } from '../socket/socket';
-import { BroadcastSocketMessage, isBroadcastMessage, MessageFromSocket } from '../socket/types';
+import { v4 as uuid } from 'uuid';
+import { FetchResult, Operation } from '@apollo/client';
 
-export class AbsintheSubscription<T extends FetchResult = FetchResult> {
+import { Observable } from 'rxjs';
+import { filter, map } from 'rxjs/operators';
+
+import { PhoenixChannel } from '../phoenix/channel';
+import { PhoenixSocket } from '../socket/socket';
+import { BroadcastSocketMessage, isBroadcastMessage, MessageFromSocket, MessageToSocket } from '../phoenix/types';
+import { PhoenixSerializer } from '../phoenix/serializer';
+
+export class AbsintheSubscription<
+  T extends FetchResult = FetchResult,
+  Message extends { result: T; subscriptionId: string } = { result: T; subscriptionId: string }
+> {
   private operations: {
     [key: string]: {
       operation: Operation;
       subscriptionId: string;
     };
   } = {};
-  private socket: PhoenixSocket<{ result: T; subscriptionId: string }>;
-  private channel: PhoenixChannel<{ result: T; subscriptionId: string }>;
-  private data: Observable<BroadcastSocketMessage<{ result: T; subscriptionId: string }>>;
+  private data: Observable<BroadcastSocketMessage<Message>>;
+
+  private socket: PhoenixSocket<MessageToSocket<Message>, MessageFromSocket<Message>>;
+  private channel: PhoenixChannel<Message, Message>;
+  private serializer: PhoenixSerializer<Message, Message> = new PhoenixSerializer();
 
   constructor(url: string) {
-    this.socket = new PhoenixSocket({ url });
+    this.socket = new PhoenixSocket({
+      url,
+      encoder: this.serializer.encode,
+      decoder: this.serializer.decode,
+    });
     this.channel = new PhoenixChannel('__absinthe__:control', this.socket);
     this.channel.join();
 
-    this.data = new Observable<MessageFromSocket<{ result: T; subscriptionId: string }>>(subscriber =>
-      this.socket.subscribe(subscriber)
-    ).pipe(
+    this.data = new Observable<MessageFromSocket<Message>>(subscriber => this.socket.subscribe(subscriber)).pipe(
       filter(isBroadcastMessage),
       filter(({ event }) => event === 'subscription:data')
     );
@@ -35,7 +45,7 @@ export class AbsintheSubscription<T extends FetchResult = FetchResult> {
     const id = uuid();
     this.operations[id] = { operation, subscriptionId: '' };
 
-    const subscription = new Observable<BroadcastSocketMessage<{ result: T; subscriptionId: string }>>(subscriber =>
+    const subscription = new Observable<BroadcastSocketMessage<Message>>(subscriber =>
       this.data.subscribe(subscriber)
     ).pipe(
       filter(({ topic }) => topic === this.operations[id]!.subscriptionId),
@@ -50,7 +60,7 @@ export class AbsintheSubscription<T extends FetchResult = FetchResult> {
       subscription.subscribe(subscriber);
 
       return () => {
-        this.channel.next('unsubscribe', { subscriptionId: `${this.operations[id]!.subscriptionId}` });
+        this.channel.next('unsubscribe', { subscriptionId: `${this.operations[id].subscriptionId}` } as Message);
         delete this.operations[id];
       };
     });

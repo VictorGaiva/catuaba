@@ -1,31 +1,30 @@
 import { PartialObserver, Subject } from 'rxjs';
-import { SocketPayloadType } from './types';
 
 // const DEFAULT_VSN = "2.0.0";
 // const DEFAULT_TIMEOUT = 10000;
 // const WS_CLOSE_NORMAL = 1000;
 
-type SocketOptions<R, S> = {
+type SocketOptions<Send, Receive> = {
   url: string;
   protocols?: string | string[];
-  decoder: (data: any) => R;
-  encoder: (data: S) => SocketPayloadType;
+  decoder: (data: any) => Receive;
+  encoder: (data: Send) => any;
 };
 
-export class PhoenixSocket<R, S> {
+export class PhoenixSocket<Send, Receive> {
   private socket: WebSocket;
-  private subject: Subject<R> = new Subject();
-  private decoder: (data: any) => R;
-  private encoder: (data: S) => SocketPayloadType;
+  private subject: Subject<Receive> = new Subject();
+  private decoder: (data: any) => Receive;
+  private encoder: (data: Send) => any;
 
   private timer?: number;
   private interval?: number;
   private timeout?: number;
-  private runner?: (socket: PhoenixSocket<R, S>) => Promise<void> | void;
+  private runner?: (socket: PhoenixSocket<Send, Receive>) => Promise<void> | void;
 
-  private queue: S[] = [];
+  private queue: Send[] = [];
 
-  constructor({ url, protocols, decoder, encoder }: SocketOptions<R, S>) {
+  constructor({ url, protocols, decoder, encoder }: SocketOptions<Send, Receive>) {
     this.socket = new WebSocket(url, protocols);
     this.decoder = decoder;
     this.encoder = encoder;
@@ -59,11 +58,11 @@ export class PhoenixSocket<R, S> {
     });
   }
 
-  subscribe(observer: PartialObserver<R>) {
+  subscribe(observer: PartialObserver<Receive>) {
     return this.subject.subscribe(observer);
   }
 
-  send(data: S) {
+  send(data: Send) {
     if (this.socket.readyState !== WebSocket.OPEN) {
       this.queue.push(data);
     } else {
@@ -95,7 +94,7 @@ export class PhoenixSocket<R, S> {
   registerHeartbeatRunner(
     interval: number,
     timeout: number,
-    runner: (socket: PhoenixSocket<R, S>) => Promise<void> | void
+    runner: (socket: PhoenixSocket<Send, Receive>) => Promise<void> | void
   ) {
     this.interval = interval;
     this.runner = runner;

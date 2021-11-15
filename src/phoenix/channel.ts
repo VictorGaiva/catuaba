@@ -14,27 +14,23 @@ import {
   ReplyChannelMessage,
   ReplySocketMessage,
 } from './types';
-import { SocketPayloadType } from '../socket/types';
 import { PhoenixSocket } from '../socket/socket';
 
-export class PhoenixChannel<
-  R extends SocketPayloadType = SocketPayloadType,
-  S extends SocketPayloadType = SocketPayloadType
-> {
+export class PhoenixChannel<Send, Receive> {
   private join_ref: string | undefined;
   private sequence: number = 1;
   private _state: ChannelState = 'closed';
 
-  private $rawData: Observable<MessageFromSocket<R>>;
-  private $mappedData: Observable<ChannelMessage<R>>;
+  private $rawData: Observable<MessageFromSocket<Receive>>;
+  private $mappedData: Observable<ChannelMessage<Receive>>;
 
   private controlSequences: { event: ChannelEvent; ref: string }[] = [];
 
-  private queue: MessageToSocket<S>[] = [];
+  private queue: MessageToSocket<Send>[] = [];
 
-  constructor(private topic: string, private socket: PhoenixSocket<MessageFromSocket<R>, MessageToSocket<S>>) {
+  constructor(private topic: string, private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Receive>>) {
     // Messages for this Channel
-    this.$rawData = new Observable<MessageFromSocket<R>>(subscriber => this.socket.subscribe(subscriber)).pipe(
+    this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
       filter(({ topic }) => topic === this.topic)
     );
 
@@ -50,7 +46,7 @@ export class PhoenixChannel<
     });
 
     this.$mappedData = this.$rawData.pipe(
-      map<MessageFromSocket<R>, ChannelMessage<R>>(message => {
+      map<MessageFromSocket<Receive>, ChannelMessage<Receive>>(message => {
         if (isPushMessage(message))
           return {
             event: message.event,
@@ -77,12 +73,12 @@ export class PhoenixChannel<
     return `${this._state}`;
   }
 
-  subscribe(observer: PartialObserver<ChannelMessage<R>>) {
+  subscribe(observer: PartialObserver<ChannelMessage<Receive>>) {
     return this.$mappedData.subscribe(observer);
   }
 
   toObservable() {
-    return new Observable<ChannelMessage<R>>(subscriber => this.$mappedData.subscribe(subscriber));
+    return new Observable<ChannelMessage<Receive>>(subscriber => this.$mappedData.subscribe(subscriber));
   }
 
   /**
@@ -130,7 +126,7 @@ export class PhoenixChannel<
    * @param event The event to send
    * @param payload The payload to send
    */
-  next(event: string, payload: S) {
+  next(event: string, payload: Send) {
     if (this._state === 'joined')
       this.send({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
     else this.queue.push({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
@@ -142,13 +138,13 @@ export class PhoenixChannel<
    * @param payload The payload to send
    * @param options Options for the command.
    */
-  async run(event: string, payload: S, opts?: ChannelRunOpts) {
+  async run(event: string, payload: Send, opts?: ChannelRunOpts) {
     const { force = false } = opts ?? {};
     // Keep the sequence within the scope
     const ref = `${this.sequence++}`;
 
     // Running some event
-    const response = new Promise<ReplyChannelMessage<R>>((res, rej) => {
+    const response = new Promise<ReplyChannelMessage<Receive>>((res, rej) => {
       let resolved = false;
       // Keep the sequence within the scope
       this.$rawData.subscribe({
@@ -180,14 +176,14 @@ export class PhoenixChannel<
   /**
    * Send the data to the socket
    */
-  private send(data: MessageToSocket<S>) {
+  private send(data: MessageToSocket<Send>) {
     this.socket.send(data);
   }
 
   /**
    * Send the command to the socket
    */
-  private async runCommand(event: 'phx_join' | 'phx_leave', payload?: S) {
+  private async runCommand(event: 'phx_join' | 'phx_leave', payload?: Send) {
     // Keep the sequence within the scope
     const ref = `${this.sequence++}`;
 
@@ -195,7 +191,7 @@ export class PhoenixChannel<
     this.controlSequences.push({ event, ref: ref });
 
     // Start the subscription
-    const response = new Promise<ReplySocketMessage<R>>((res, rej) => {
+    const response = new Promise<ReplySocketMessage<Receive>>((res, rej) => {
       let resolved = false;
       // Keep the sequence within the scope
       const subscription = this.$rawData.subscribe({
@@ -225,7 +221,7 @@ export class PhoenixChannel<
         this._state = 'leaving';
         break;
     }
-    this.send({ event, join_ref: this.join_ref, ref, payload: payload ?? ({} as S), topic: this.topic });
+    this.send({ event, join_ref: this.join_ref, ref, payload: payload ?? ({} as Send), topic: this.topic });
     return response;
   }
 }

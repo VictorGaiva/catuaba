@@ -12,24 +12,22 @@ import {
 const HEADER_LENGTH = 1;
 const META_LENGTH = 4;
 
-export class PhoenixSerializer {
-  static encode<T>(data: MessageToSocket<T>) {
+export class PhoenixSerializer<Send, Receive> {
+  encode(data: MessageToSocket<Send>) {
     return isBinary(data)
       ? this.binaryEncode(data)
       : JSON.stringify([data.join_ref, data.ref, data.topic, data.event, data.payload]);
   }
 
-  // TODO: fix typing
-  static decode<T>(data: RawSocketMessage): MessageFromSocket<T> {
+  decode(data: RawSocketMessage): MessageFromSocket<Receive> {
     if (data instanceof ArrayBuffer) {
-      //@ts-ignore
-      return this.binaryDecode(data);
+      return (this.binaryDecode(data) as unknown) as MessageFromSocket<Receive>;
     }
     const [join_ref, ref, topic, event, payload] = JSON.parse(data);
     return { join_ref, ref, topic, event, payload };
   }
 
-  private static binaryEncode({ join_ref = '', ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
+  private binaryEncode({ join_ref = '', ref, event, topic, payload }: MessageToSocket<ArrayBuffer>) {
     const metaLength = META_LENGTH + join_ref.length + ref.length + topic.length + event.length;
     const header = new ArrayBuffer(HEADER_LENGTH + metaLength);
     const view = new DataView(header);
@@ -53,7 +51,7 @@ export class PhoenixSerializer {
     return combined.buffer;
   }
 
-  private static binaryDecode(buffer: ArrayBuffer) {
+  private binaryDecode(buffer: ArrayBuffer) {
     const view = new DataView(buffer);
     const kind = view.getUint8(0);
     const decoder = new TextDecoder();
@@ -69,7 +67,7 @@ export class PhoenixSerializer {
     }
   }
 
-  private static decodePush(buffer: ArrayBuffer, view: DataView, decoder: TextDecoder): PushSocketMessage<ArrayBuffer> {
+  private decodePush(buffer: ArrayBuffer, view: DataView, decoder: TextDecoder): PushSocketMessage<ArrayBuffer> {
     const idSize = view.getUint8(1);
     const topicSize = view.getUint8(2);
     const eventSize = view.getUint8(3);
@@ -87,11 +85,7 @@ export class PhoenixSerializer {
     return { join_ref, topic, event, payload };
   }
 
-  private static decodeReply(
-    buffer: ArrayBuffer,
-    view: DataView,
-    decoder: TextDecoder
-  ): ReplySocketMessage<ArrayBuffer> {
+  private decodeReply(buffer: ArrayBuffer, view: DataView, decoder: TextDecoder): ReplySocketMessage<ArrayBuffer> {
     const idSize = view.getUint8(1);
     const seqSize = view.getUint8(2);
     const topicSize = view.getUint8(3);
@@ -112,7 +106,7 @@ export class PhoenixSerializer {
     return { join_ref, ref, topic, event: 'phx_reply', payload: { status: event, response: data } };
   }
 
-  private static decodeBroadcast(
+  private decodeBroadcast(
     buffer: ArrayBuffer,
     view: DataView,
     decoder: TextDecoder
