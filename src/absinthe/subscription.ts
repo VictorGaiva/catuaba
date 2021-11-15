@@ -10,21 +10,20 @@ import { PhoenixSocket } from '../socket/socket';
 import { BroadcastSocketMessage, isBroadcastMessage, MessageFromSocket, MessageToSocket } from '../phoenix/types';
 import { PhoenixSerializer } from '../phoenix/serializer';
 
-export class AbsintheSubscription<
-  T extends FetchResult = FetchResult,
-  Message extends { result: T; subscriptionId: string } = { result: T; subscriptionId: string }
-> {
+type Send = { query?: string; variables?: Record<string, any>; subscriptionId?: string };
+type Message<T> = { result: T; subscriptionId: string };
+export class AbsintheSubscription<T extends FetchResult = FetchResult> {
   private operations: {
     [key: string]: {
       operation: Operation;
       subscriptionId: string;
     };
   } = {};
-  private data: Observable<BroadcastSocketMessage<Message>>;
+  private data: Observable<BroadcastSocketMessage<Message<T>>>;
 
-  private socket: PhoenixSocket<MessageToSocket<Message>, MessageFromSocket<Message>>;
-  private channel: PhoenixChannel<Message, Message>;
-  private serializer: PhoenixSerializer<Message, Message> = new PhoenixSerializer();
+  private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Message<T>>>;
+  private channel: PhoenixChannel<Send, Message<T>>;
+  private serializer: PhoenixSerializer<Send, Message<T>> = new PhoenixSerializer();
 
   constructor(url: string) {
     this.socket = new PhoenixSocket({
@@ -35,7 +34,7 @@ export class AbsintheSubscription<
     this.channel = new PhoenixChannel('__absinthe__:control', this.socket);
     this.channel.join();
 
-    this.data = new Observable<MessageFromSocket<Message>>(subscriber => this.socket.subscribe(subscriber)).pipe(
+    this.data = new Observable<MessageFromSocket<Message<T>>>(subscriber => this.socket.subscribe(subscriber)).pipe(
       filter(isBroadcastMessage),
       filter(({ event }) => event === 'subscription:data')
     );
@@ -45,7 +44,7 @@ export class AbsintheSubscription<
     const id = uuid();
     this.operations[id] = { operation, subscriptionId: '' };
 
-    const subscription = new Observable<BroadcastSocketMessage<Message>>(subscriber =>
+    const subscription = new Observable<BroadcastSocketMessage<Message<T>>>(subscriber =>
       this.data.subscribe(subscriber)
     ).pipe(
       filter(({ topic }) => topic === this.operations[id]!.subscriptionId),
@@ -60,7 +59,7 @@ export class AbsintheSubscription<
       subscription.subscribe(subscriber);
 
       return () => {
-        this.channel.next('unsubscribe', { subscriptionId: `${this.operations[id].subscriptionId}` } as Message);
+        this.channel.next('unsubscribe', { subscriptionId: `${this.operations[id].subscriptionId}` } as Send);
         delete this.operations[id];
       };
     });
