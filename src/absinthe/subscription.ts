@@ -46,13 +46,13 @@ export class AbsintheSubscription<T extends FetchResult = FetchResult> {
       this.broadcast.subscribe<BroadcastChannelMessage<Message<T>>>(subscriber)
     ).pipe(
       filter(({ event }) => event === 'subscription:data'),
-      filter(({ topic }) => topic === this.operations[id]!.subscriptionId),
+      filter(({ topic }) => topic === this.operations[id].subscriptionId),
       map(({ payload: { result } }) => result)
     );
 
     this.control
       .run('doc', { query: print(operation.query), variables: operation.variables })
-      .then(({ payload }) => (this.operations[id]!.subscriptionId = payload.response.subscriptionId));
+      .then(({ payload }) => (this.operations[id].subscriptionId = payload.response.subscriptionId));
 
     return new Observable<T>(subscriber => {
       subscription.subscribe(subscriber);

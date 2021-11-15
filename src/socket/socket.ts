@@ -20,7 +20,9 @@ export class PhoenixSocket<Send, Receive> {
   private timer?: number;
   private interval?: number;
   private timeout?: number;
-  private runner?: (socket: PhoenixSocket<Send, Receive>) => Promise<void> | void;
+  private runner?: () => Promise<void> | void;
+
+  public hasRunner = false;
 
   private queue: Send[] = [];
 
@@ -80,7 +82,7 @@ export class PhoenixSocket<Send, Receive> {
   private async heartbeat(backoff = 25) {
     if (this.runner) {
       try {
-        await Promise.race([this.runner(this), new Promise((_, rej) => setTimeout(rej, this.timeout))]);
+        await Promise.race([this.runner(), new Promise((_, rej) => setTimeout(rej, this.timeout))]);
         this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
       } catch (err) {
         this.timer = (setTimeout(
@@ -91,11 +93,8 @@ export class PhoenixSocket<Send, Receive> {
     }
   }
 
-  registerHeartbeatRunner(
-    interval: number,
-    timeout: number,
-    runner: (socket: PhoenixSocket<Send, Receive>) => Promise<void> | void
-  ) {
+  registerHeartbeatRunner(interval: number, timeout: number, runner: () => Promise<void> | void) {
+    this.hasRunner = true;
     this.interval = interval;
     this.runner = runner;
     this.timeout = timeout;

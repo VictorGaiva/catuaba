@@ -91,6 +91,12 @@ export class PhoenixChannel<Send, Receive> {
       },
       next: () => {},
     });
+
+    if (!this.socket.hasRunner) {
+      this.socket.registerHeartbeatRunner(30000, 1000, async () => {
+        await this.run('heartbeat', {} as Send);
+      });
+    }
   }
 
   get state() {
