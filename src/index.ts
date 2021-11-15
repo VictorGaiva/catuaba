@@ -1,5 +1,5 @@
 export { AbsintheLink } from './absinthe/apollo-link';
-export { AbsintheSubscription } from './absinthe/subscription';
+export { AbsintheOperation } from './absinthe/absinthe';
 
 export { PhoenixChannel } from './phoenix/channel';
 export { PhoenixSerializer } from './phoenix/serializer';

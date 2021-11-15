@@ -10,20 +10,24 @@ import { PhoenixSocket } from '../socket/socket';
 import { BroadcastChannelMessage, MessageFromSocket, MessageToSocket } from '../phoenix/types';
 import { PhoenixChannel } from '../phoenix/channel';
 import { PhoenixSerializer } from '../phoenix/serializer';
+import { getMainDefinition } from '@apollo/client/utilities';
 
 type Send = { query?: string; variables?: Record<string, any>; subscriptionId?: string };
-type Message<T> = { result: T; subscriptionId: string };
-export class AbsintheSubscription<T extends FetchResult = FetchResult> {
+type Message<T> = { result: T; subscriptionId: string; errors?: any[] };
+export class AbsintheOperation<T extends FetchResult = FetchResult> {
   private operations: {
     [key: string]: {
       operation: Operation;
       subscriptionId: string;
     };
   } = {};
+
   private control: PhoenixChannel<Send, Message<T>>;
+
   private broadcast: PhoenixChannel<Send, Message<T>>;
 
   private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Message<T>>>;
+
   private serializer: PhoenixSerializer<Send, Message<T>> = new PhoenixSerializer();
 
   constructor(url: string) {
@@ -39,6 +43,14 @@ export class AbsintheSubscription<T extends FetchResult = FetchResult> {
   }
 
   request(operation: Operation): Observable<FetchResult> {
+    const definition = getMainDefinition(operation.query);
+    if (definition.kind === 'OperationDefinition' && definition.operation === 'subscription') {
+      return this.handleSubscription(operation);
+    }
+    return this.handleQuery(operation);
+  }
+
+  private handleSubscription(operation: Operation): Observable<FetchResult> {
     const id = uuid();
     this.operations[id] = { operation, subscriptionId: '' };
 
@@ -50,9 +62,9 @@ export class AbsintheSubscription<T extends FetchResult = FetchResult> {
       map(({ payload: { result } }) => result)
     );
 
-    this.control
-      .run('doc', { query: print(operation.query), variables: operation.variables })
-      .then(({ payload }) => (this.operations[id].subscriptionId = payload.response.subscriptionId));
+    this.control.run('doc', { query: print(operation.query), variables: operation.variables }).then(({ payload }) => {
+      this.operations[id].subscriptionId = payload.response.subscriptionId;
+    });
 
     return new Observable<T>(subscriber => {
       subscription.subscribe(subscriber);
@@ -61,6 +73,20 @@ export class AbsintheSubscription<T extends FetchResult = FetchResult> {
         this.control.next('unsubscribe', { subscriptionId: `${this.operations[id].subscriptionId}` } as Send);
         delete this.operations[id];
       };
+    });
+  }
+
+  private handleQuery(operation: Operation): Observable<FetchResult> {
+    return new Observable<FetchResult>(subscriber => {
+      this.control.run('doc', { query: print(operation.query), variables: operation.variables }).then(({ payload }) => {
+        const { response } = payload;
+        if (response.errors) {
+          subscriber.error(response.errors);
+        } else {
+          subscriber.next(response);
+        }
+        subscriber.complete();
+      });
     });
   }
 }
