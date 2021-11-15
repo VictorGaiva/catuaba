@@ -6,17 +6,6 @@ import { MessageFromSocket, MessageToSocket, SocketPayloadType } from './types';
 // const DEFAULT_TIMEOUT = 10000;
 // const WS_CLOSE_NORMAL = 1000;
 
-type SocketOptions<R extends SocketPayloadType, S extends SocketPayloadType> = {
-  url: string;
-  protocols?: string | string[];
-  heartbeatInterval?: number;
-  /**
-   * A custom runner for hearbeats, that resolves when there is a response
-   */
-  heartbeatRunner: (socket: PhoenixSocket<R, S>) => Promise<void> | void;
-  heartbeatTimeout?: number;
-};
-
 export class PhoenixSocket<
   R extends SocketPayloadType = SocketPayloadType,
   S extends SocketPayloadType = SocketPayloadType
@@ -33,11 +22,8 @@ export class PhoenixSocket<
 
   private serializer: PhoenixSerializer = new PhoenixSerializer();
 
-  constructor({ url, protocols, heartbeatRunner, heartbeatInterval = 30000, heartbeatTimeout }: SocketOptions<R, S>) {
+  constructor({ url, protocols }: { url: string; protocols?: string | string[] }) {
     this.socket = new WebSocket(url, protocols);
-    this.interval = heartbeatInterval;
-    this.runner = heartbeatRunner;
-    this.timeout = heartbeatTimeout;
 
     this.socket.addEventListener('close', () => {
       if (this.timer) clearTimeout(this.timer);
@@ -99,5 +85,16 @@ export class PhoenixSocket<
         ) as unknown) as number;
       }
     }
+  }
+
+  registerHeartbeatRunner(
+    interval: number,
+    timeout: number,
+    runner: (socket: PhoenixSocket<R, S>) => Promise<void> | void
+  ) {
+    this.interval = interval;
+    this.runner = runner;
+    this.timeout = timeout;
+    this.resetHeartbeat();
   }
 }

@@ -4,7 +4,8 @@ import { Observable } from 'rxjs';
 import { v4 as uuid } from 'uuid';
 import { filter, map } from 'rxjs/operators';
 import { print } from 'graphql';
-import { BroadcastSocketMessage, isBroadcastMessage, MessageFromSocket, PhoenixSocket } from '../socket/socket';
+import { PhoenixSocket } from '../socket/socket';
+import { BroadcastSocketMessage, isBroadcastMessage, MessageFromSocket } from '../socket/types';
 
 export class AbsintheSubscription<T extends FetchResult = FetchResult> {
   private operations: {
