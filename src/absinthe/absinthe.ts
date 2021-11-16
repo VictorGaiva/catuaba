@@ -30,14 +30,13 @@ export class AbsintheOperation<T extends FetchResult = FetchResult> {
 
   private serializer: PhoenixSerializer<Send, Message<T>> = new PhoenixSerializer();
 
-  constructor(url: string) {
-    this.socket = new PhoenixSocket({
-      url,
+  constructor(url: string, joinParams?: (() => Send) | Send) {
+    this.socket = new PhoenixSocket(url, {
       encoder: this.serializer.encode,
       decoder: this.serializer.decode,
     });
-    this.control = new PhoenixChannel(this.socket, { topic: '__absinthe__:control' });
-    this.broadcast = new PhoenixChannel(this.socket, { broadcast: true });
+    this.control = new PhoenixChannel('__absinthe__:control', joinParams, this.socket);
+    this.broadcast = new PhoenixChannel('', joinParams, this.socket);
 
     this.control.join();
   }

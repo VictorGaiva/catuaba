@@ -5,9 +5,9 @@ import { AbsintheOperation } from './absinthe';
 
 export class AbsintheLink extends ApolloLink {
   private client: AbsintheOperation;
-  constructor(url: string) {
+  constructor(url: string, joinParams?: Record<string, unknown> | (() => Record<string, unknown>)) {
     super();
-    this.client = new AbsintheOperation(url);
+    this.client = new AbsintheOperation(url, joinParams);
   }
 
   request(operation: Operation, _forward?: NextLink) {

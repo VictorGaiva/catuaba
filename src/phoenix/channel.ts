@@ -16,9 +16,7 @@ import {
 } from './types';
 import { PhoenixSocket } from '../socket/socket';
 
-type ChannelOptions = { topic: string; broadcast?: false | undefined } | { broadcast: true };
-
-export class PhoenixChannel<Send, Receive> {
+export class PhoenixChannel<Send = unknown, Receive = Send> {
   private join_ref: string | undefined;
   private sequence: number = 1;
   private _state: ChannelState = 'closed';
@@ -28,15 +26,12 @@ export class PhoenixChannel<Send, Receive> {
 
   private queue: MessageToSocket<Send>[] = [];
 
-  private topic?: string;
-  public isReadOnly: boolean = false;
-
   constructor(
+    private _topic: string,
+    private joinParams: (()=>Send) | Send = {} as Send,
     private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Receive>>,
-    options: ChannelOptions
   ) {
-    if (options.broadcast) {
-      this.isReadOnly = true;
+    if (_topic === "") {
       this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
         filter(isBroadcastMessage)
       );
@@ -47,9 +42,8 @@ export class PhoenixChannel<Send, Receive> {
         )
       );
     } else {
-      this.topic = options.topic;
       this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
-        filter(({ topic }) => topic === this.topic)
+        filter(({ topic }) => topic === this._topic)
       );
 
       this.$mappedData = this.$rawData.pipe(map(PhoenixChannel.SocketToChannel<Receive>()));
@@ -68,10 +62,19 @@ export class PhoenixChannel<Send, Receive> {
 
     if (!this.socket.hasRunner) {
       this.socket.registerHeartbeatRunner(30000, 1000, async () => {
-        await this.runCommand('heartbeat', {} as Send);
+        await this.runCommand('heartbeat');
       });
     }
   }
+
+  get state() {
+    return this._state;
+  }
+
+  get topic() {
+    return this._topic;
+  }
+
 
   private static SocketToChannel<Receive>(): (message: MessageFromSocket<Receive>) => ChannelMessage<Receive> {
     return message => {
@@ -109,10 +112,12 @@ export class PhoenixChannel<Send, Receive> {
    * Joins the channel, returning a promise that resolves when the channel is joined.
    */
   async join() {
-    if (this.isReadOnly) {
+    if (this._topic === "") {
       throw new Error('Cannot join Broadcast channel');
     }
-    if (this._state === 'joined') return;
+    if (this._state === 'joined') {
+      throw new Error('Error: tried to join multiple times');
+    };
 
     this.join_ref ??= uuid();
     this._state = 'joining';
@@ -154,12 +159,12 @@ export class PhoenixChannel<Send, Receive> {
    * @param payload The payload to send
    */
   next(event: string, payload: Send) {
-    if (this.topic === undefined || this.isReadOnly) {
+    if (this._topic === "") {
       throw new Error('Cannot send data to Broadcast channel');
     }
     if (this._state === 'joined')
-      this.send({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
-    else this.queue.push({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this.topic });
+      this.send({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this._topic });
+    else this.queue.push({ event, payload, join_ref: this.join_ref, ref: `${this.sequence++}`, topic: this._topic });
   }
 
   /**
@@ -169,7 +174,7 @@ export class PhoenixChannel<Send, Receive> {
    * @param options Options for the command.
    */
   async run(event: string, payload: Send, opts?: ChannelRunOpts) {
-    if (this.topic === undefined || this.isReadOnly) {
+    if (this._topic === "") {
       throw new Error('Cannot send data to Broadcast channel');
     }
     const { force = false } = opts ?? {};
@@ -201,8 +206,8 @@ export class PhoenixChannel<Send, Receive> {
       });
     });
     if (this._state === 'joined' || force)
-      this.send({ event, join_ref: this.join_ref, ref, payload, topic: this.topic });
-    else this.queue.push({ event, join_ref: this.join_ref, ref, payload, topic: this.topic });
+      this.send({ event, join_ref: this.join_ref, ref, payload, topic: this._topic });
+    else this.queue.push({ event, join_ref: this.join_ref, ref, payload, topic: this._topic });
     return response;
   }
 
@@ -216,8 +221,8 @@ export class PhoenixChannel<Send, Receive> {
   /**
    * Send the command to the socket
    */
-  private async runCommand(event: 'phx_join' | 'phx_leave' | 'heartbeat', payload?: Send) {
-    if (this.topic === undefined || this.isReadOnly) {
+  private async runCommand(event: 'phx_join' | 'phx_leave' | 'heartbeat') {
+    if (this._topic === "") {
       throw new Error('Cannot send data to Broadcast channel');
     }
     // Keep the sequence within the scope
@@ -258,8 +263,10 @@ export class PhoenixChannel<Send, Receive> {
       event,
       join_ref: this.join_ref,
       ref,
-      payload: payload ?? ({} as Send),
-      topic: event === 'heartbeat' ? 'phoenix' : this.topic,
+      payload: typeof this.joinParams === "function" 
+        ? (this.joinParams as () => Send)()
+        : this.joinParams,
+      topic: event === 'heartbeat' ? 'phoenix' : this._topic,
     });
     return response;
   }

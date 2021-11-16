@@ -5,13 +5,13 @@ import { PartialObserver, Subject } from 'rxjs';
 // const WS_CLOSE_NORMAL = 1000;
 
 type SocketOptions<Send, Receive> = {
-  url: string | (() => string);
   protocols?: string | string[];
-  decoder: (data: any) => Receive;
-  encoder: (data: Send) => any;
+  timeout?: number;
+  decoder?: (data: any) => Receive;
+  encoder?: (data: Send) => any;
 };
 
-export class PhoenixSocket<Send, Receive> extends EventTarget {
+export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
   private socket: WebSocket;
   private subject: Subject<Receive> = new Subject();
   private decoder: (data: any) => Receive;
@@ -28,12 +28,17 @@ export class PhoenixSocket<Send, Receive> extends EventTarget {
 
   private queue: Send[] = [];
 
-  constructor(private opts: SocketOptions<Send, Receive>, private WebSocketConstructor: typeof WebSocket = WebSocket) {
+  constructor(
+    private url: string | (() => string),
+    private opts: SocketOptions<Send, Receive> = {},
+    private WebSocketConstructor: typeof WebSocket = WebSocket
+  ) {
     super();
-    const url = typeof opts.url === 'function' ? opts.url() : opts.url;
-    this.socket = new this.WebSocketConstructor(url, opts.protocols);
-    this.decoder = opts.decoder;
-    this.encoder = opts.encoder;
+    const urlString = typeof this.url === 'function' ? this.url() : this.url;
+    this.socket = new this.WebSocketConstructor(urlString, opts.protocols);
+    this.decoder = opts.decoder ?? JSON.parse;
+    this.encoder = opts.encoder ?? JSON.stringify;
+    this.timeout = opts.timeout;
 
     this.socket.addEventListener('close', this.onClose.bind(this));
     this.socket.addEventListener('open', this.onOpen.bind(this));
@@ -42,9 +47,9 @@ export class PhoenixSocket<Send, Receive> extends EventTarget {
   private async onClose(_: Event) {
     this.reconnecting = false;
     if (this.timer) clearTimeout(this.timer);
-    // Reconnect
+
     if (this.socket.readyState === WebSocket.CLOSED) {
-      this.dispatchEvent(new Event('disconnected'));
+      this.dispatchEvent(new CustomEvent('disconnected'));
       this.backoff = Math.min(this.backoff * 2, 8000);
       setTimeout(() => this.reconnect(), this.backoff);
     }
@@ -62,7 +67,7 @@ export class PhoenixSocket<Send, Receive> extends EventTarget {
     this.socket.addEventListener('message', this.onMessage.bind(this));
     if (this.reconnecting) {
       this.reconnecting = false;
-      this.dispatchEvent(new Event('reconnected'));
+      this.dispatchEvent(new CustomEvent('reconnected'));
     }
   }
 
@@ -85,9 +90,9 @@ export class PhoenixSocket<Send, Receive> extends EventTarget {
 
   private reconnect() {
     if (!this.reconnecting) {
-      const url = typeof this.opts.url === 'function' ? this.opts.url() : this.opts.url;
+      const urlString = typeof this.url === 'function' ? this.url() : this.url;
 
-      this.socket = new this.WebSocketConstructor(url, this.opts.protocols);
+      this.socket = new this.WebSocketConstructor(urlString, this.opts.protocols);
       this.socket.addEventListener('close', this.onClose.bind(this));
       this.socket.addEventListener('open', this.onOpen.bind(this));
       this.reconnecting = true;
@@ -103,6 +108,13 @@ export class PhoenixSocket<Send, Receive> extends EventTarget {
       this.queue.push(data);
     } else {
       this.socket.send(this.encoder(data) as any);
+    }
+  }
+
+  close() {
+    if (this.timer) clearTimeout(this.timer);
+    if (this.socket.readyState !== WebSocket.CLOSED) {
+      this.socket.close();
     }
   }
 
