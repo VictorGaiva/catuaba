@@ -30,6 +30,7 @@ export class AbsintheOperation<T extends FetchResult = FetchResult> {
 
   private serializer: PhoenixSerializer<Send, Message<T>> = new PhoenixSerializer();
 
+  constructor(
     url: string,
     joinParams: Record<string, string | number> | (() => Record<string, string | number>) = {},
     queryString: string | (() => string) = ''
@@ -57,38 +58,41 @@ export class AbsintheOperation<T extends FetchResult = FetchResult> {
     const id = uuid();
     this.operations[id] = { operation, subscriptionId: '' };
 
-    const subscription = new Observable<BroadcastChannelMessage<Message<T>>>(subscriber =>
-      this.broadcast.subscribe<BroadcastChannelMessage<Message<T>>>(subscriber)
-    ).pipe(
+    const subscription = new Observable<BroadcastChannelMessage<Message<T>>>((subscriber) => {
+      this.broadcast.subscribe<BroadcastChannelMessage<Message<T>>>(subscriber);
+
+      this.control
+        .run('doc', { query: print(operation.query), variables: operation.variables })
+        .then(({ payload }) => (this.operations[id].subscriptionId = payload.response.subscriptionId))
+        .catch(({ response }) => subscriber.error(response));
+    }).pipe(
       filter(({ event }) => event === 'subscription:data'),
       filter(({ topic }) => topic === this.operations[id].subscriptionId),
-      map(({ payload: { result } }) => result)
+      map(({ payload }) => payload.result)
     );
 
-    this.control.run('doc', { query: print(operation.query), variables: operation.variables }).then(({ payload }) => {
-      this.operations[id].subscriptionId = payload.response.subscriptionId;
-    });
-
-    return new Observable<T>(subscriber => {
+    return new Observable<T>((subscriber) => {
       subscription.subscribe(subscriber);
 
       return () => {
-        this.control.next('unsubscribe', { subscriptionId: `${this.operations[id].subscriptionId}` } as Send);
+        if (this.operations[id].subscriptionId) {
+          this.control.next('unsubscribe', { subscriptionId: `${this.operations[id].subscriptionId}` });
+        }
         delete this.operations[id];
       };
     });
   }
 
   private handleQuery(operation: Operation): Observable<FetchResult> {
-    return new Observable<FetchResult>(subscriber => {
+    return new Observable<FetchResult>((subscriber) => {
       this.control.run('doc', { query: print(operation.query), variables: operation.variables }).then(({ payload }) => {
         const { response } = payload;
-        if (response.errors) {
+        if (payload.status === 'error') {
           subscriber.error(response.errors);
         } else {
           subscriber.next(response);
+          subscriber.complete();
         }
-        subscriber.complete();
       });
     });
   }

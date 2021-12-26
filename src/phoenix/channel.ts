@@ -29,12 +29,16 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
   constructor(
     private _topic: string,
     private joinParams: (() => Record<string, string | number>) | Record<string, string | number> = {},
+    private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Receive>>
   ) {
     if (_topic === '') {
+      this.$rawData = new Observable<MessageFromSocket<Receive>>((subscriber) =>
+        this.socket.subscribe(subscriber)
+      ).pipe(filter(isBroadcastMessage));
 
       this.$mappedData = this.$rawData.pipe(
         map<MessageFromSocket<Receive>, BroadcastChannelMessage<Receive>>(
-          ({ event, payload }) => ({ event, payload, type: 'broadcast' } as BroadcastChannelMessage<Receive>)
+          (data) => ({ ...data, type: 'broadcast' } as BroadcastChannelMessage<Receive>)
         )
       );
     } else {
@@ -178,23 +182,27 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
 
     // Running some event
     const response = new Promise<ReplyChannelMessage<Receive>>((res, rej) => {
-      let resolved = false;
+      let replied = false;
       // Keep the sequence within the scope
       this.$rawData.subscribe({
-        error: err => rej(err),
+        error: (err) => rej(err),
         complete: () => {
-          if (!resolved) rej('Subscription unexpectedly completed before receiving reponse.');
+          if (!replied) rej('Subscription unexpectedly completed before receiving reponse.');
         },
-        next: data => {
+        next: (data) => {
           if (isReplyMessage(data)) {
             // Resolve the promise to the data when the sequence matches the expected value
             if (data.ref === ref) {
-              resolved = true;
-              res({
-                event: data.event,
-                payload: data.payload,
-                type: 'reply',
-              });
+              if (data.payload.status === 'error') {
+                rej(data.payload);
+              } else {
+                replied = true;
+                res({
+                  event: data.event,
+                  payload: data.payload,
+                  type: 'reply',
+                });
+              }
             }
           }
         },
