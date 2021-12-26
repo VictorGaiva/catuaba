@@ -9,6 +9,7 @@ type SocketOptions<Send, Receive> = {
   timeout?: number;
   decoder?: (data: any) => Receive;
   encoder?: (data: Send) => any;
+  queryString?: string | (() => string);
 };
 
 export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
@@ -35,7 +36,9 @@ export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
   ) {
     super();
     const urlString = typeof this.url === 'function' ? this.url() : this.url;
-    this.socket = new this.WebSocketConstructor(urlString, opts.protocols);
+    const queryString = typeof this.opts.queryString === 'function' ? this.opts.queryString() : this.opts.queryString;
+    this.socket = new this.WebSocketConstructor(`${urlString}${queryString ? `?${queryString}` : ''}`, opts.protocols);
+
     this.decoder = opts.decoder ?? JSON.parse;
     this.encoder = opts.encoder ?? JSON.stringify;
     this.timeout = opts.timeout;
@@ -91,8 +94,11 @@ export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
   private reconnect() {
     if (!this.reconnecting) {
       const urlString = typeof this.url === 'function' ? this.url() : this.url;
-
-      this.socket = new this.WebSocketConstructor(urlString, this.opts.protocols);
+      const queryString = typeof this.opts.queryString === 'function' ? this.opts.queryString() : this.opts.queryString;
+      this.socket = new this.WebSocketConstructor(
+        `${urlString}${queryString ? `?${queryString}` : ''}`,
+        this.opts.protocols
+      );
       this.socket.addEventListener('close', this.onClose.bind(this));
       this.socket.addEventListener('open', this.onOpen.bind(this));
       this.reconnecting = true;

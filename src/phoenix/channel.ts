@@ -28,8 +28,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
 
   constructor(
     private _topic: string,
-    private joinParams: (()=>Send) | Send = {} as Send,
-    private socket: PhoenixSocket<MessageToSocket<Send>, MessageFromSocket<Receive>>,
+    private joinParams: (() => Record<string, string | number>) | Record<string, string | number> = {},
   ) {
     if (_topic === "") {
       this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
@@ -263,9 +262,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
       event,
       join_ref: this.join_ref,
       ref,
-      payload: typeof this.joinParams === "function" 
-        ? (this.joinParams as () => Send)()
-        : this.joinParams,
+      payload: (typeof this.joinParams === 'function' ? this.joinParams() : this.joinParams) as unknown as Send,
       topic: event === 'heartbeat' ? 'phoenix' : this._topic,
     });
     return response;
