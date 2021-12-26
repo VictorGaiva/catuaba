@@ -30,10 +30,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
     private _topic: string,
     private joinParams: (() => Record<string, string | number>) | Record<string, string | number> = {},
   ) {
-    if (_topic === "") {
-      this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
-        filter(isBroadcastMessage)
-      );
+    if (_topic === '') {
 
       this.$mappedData = this.$rawData.pipe(
         map<MessageFromSocket<Receive>, BroadcastChannelMessage<Receive>>(
@@ -41,9 +38,9 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
         )
       );
     } else {
-      this.$rawData = new Observable<MessageFromSocket<Receive>>(subscriber => this.socket.subscribe(subscriber)).pipe(
-        filter(({ topic }) => topic === this._topic)
-      );
+      this.$rawData = new Observable<MessageFromSocket<Receive>>((subscriber) =>
+        this.socket.subscribe(subscriber)
+      ).pipe(filter(({ topic }) => topic === this._topic));
 
       this.$mappedData = this.$rawData.pipe(map(PhoenixChannel.SocketToChannel<Receive>()));
     }
@@ -60,7 +57,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
     });
 
     if (!this.socket.hasRunner) {
-      this.socket.registerHeartbeatRunner(30000, 1000, async () => {
+      this.socket.registerHeartbeatRunner(15000, 1000, async () => {
         await this.runCommand('heartbeat');
       });
     }
@@ -74,9 +71,8 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
     return this._topic;
   }
 
-
   private static SocketToChannel<Receive>(): (message: MessageFromSocket<Receive>) => ChannelMessage<Receive> {
-    return message => {
+    return (message) => {
       if (isPushMessage(message))
         return {
           event: message.event,
@@ -104,19 +100,19 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
   }
 
   toObservable() {
-    return new Observable<ChannelMessage<Receive>>(subscriber => this.$mappedData.subscribe(subscriber));
+    return new Observable<ChannelMessage<Receive>>((subscriber) => this.$mappedData.subscribe(subscriber));
   }
 
   /**
    * Joins the channel, returning a promise that resolves when the channel is joined.
    */
   async join() {
-    if (this._topic === "") {
+    if (this._topic === '') {
       throw new Error('Cannot join Broadcast channel');
     }
     if (this._state === 'joined') {
       throw new Error('Error: tried to join multiple times');
-    };
+    }
 
     this.join_ref ??= uuid();
     this._state = 'joining';
@@ -129,7 +125,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
         this.socket.addEventListener('disconnected', () => (this._state = 'disconnected'), { once: true });
         this.socket.addEventListener('reconnected', () => this.join(), { once: true });
 
-        this.queue.forEach(queued => this.send(queued));
+        this.queue.forEach((queued) => this.send(queued));
         this.queue = [];
       }
     } catch (err) {
@@ -158,7 +154,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
    * @param payload The payload to send
    */
   next(event: string, payload: Send) {
-    if (this._topic === "") {
+    if (this._topic === '') {
       throw new Error('Cannot send data to Broadcast channel');
     }
     if (this._state === 'joined')
@@ -173,7 +169,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
    * @param options Options for the command.
    */
   async run(event: string, payload: Send, opts?: ChannelRunOpts) {
-    if (this._topic === "") {
+    if (this._topic === '') {
       throw new Error('Cannot send data to Broadcast channel');
     }
     const { force = false } = opts ?? {};
@@ -221,7 +217,7 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
    * Send the command to the socket
    */
   private async runCommand(event: 'phx_join' | 'phx_leave' | 'heartbeat') {
-    if (this._topic === "") {
+    if (this._topic === '') {
       throw new Error('Cannot send data to Broadcast channel');
     }
     // Keep the sequence within the scope
@@ -232,12 +228,12 @@ export class PhoenixChannel<Send = unknown, Receive = Send> {
       let resolved = false;
       // Keep the sequence within the scope
       const subscription = this.$rawData.subscribe({
-        error: err => rej(err),
+        error: (err) => rej(err),
         //
         complete: () => {
           if (!resolved) rej(`Subscription unexpectedly completed before receiving reponse.`);
         },
-        next: data => {
+        next: (data) => {
           if (isReplyMessage(data)) {
             // Resolve the promise to the data when the sequence matches the expected value
             if (data.ref === ref) {

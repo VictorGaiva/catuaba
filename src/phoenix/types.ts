@@ -11,7 +11,7 @@ export type ReplySocketMessage<T> = {
   ref: string;
   topic: string;
   event: string;
-  payload: { response: T; status: string };
+  payload: { response: T; status: 'ok' | 'error' };
 };
 export type BroadcastSocketMessage<T> = {
   topic: string;

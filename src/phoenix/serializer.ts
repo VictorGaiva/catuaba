@@ -21,7 +21,7 @@ export class PhoenixSerializer<Send, Receive> {
 
   decode(data: RawSocketMessage): MessageFromSocket<Receive> {
     if (data instanceof ArrayBuffer) {
-      return (this.binaryDecode(data) as unknown) as MessageFromSocket<Receive>;
+      return this.binaryDecode(data) as unknown as MessageFromSocket<Receive>;
     }
     const [join_ref, ref, topic, event, payload] = JSON.parse(data);
     return { join_ref, ref, topic, event, payload };
@@ -39,10 +39,10 @@ export class PhoenixSerializer<Send, Receive> {
     view.setUint8(offset++, topic.length);
     view.setUint8(offset++, event.length);
 
-    Array.from(join_ref, char => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(ref, char => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(topic, char => view.setUint8(offset++, char.charCodeAt(0)));
-    Array.from(event, char => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(join_ref, (char) => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(ref, (char) => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(topic, (char) => view.setUint8(offset++, char.charCodeAt(0)));
+    Array.from(event, (char) => view.setUint8(offset++, char.charCodeAt(0)));
 
     let combined = new Uint8Array(header.byteLength + payload.byteLength);
     combined.set(new Uint8Array(header), 0);

@@ -1,6 +1,6 @@
 import { PartialObserver, Subject } from 'rxjs';
 
-// const DEFAULT_VSN = "2.0.0";
+// const DEFAULT_VSN = '2.0.0';
 // const DEFAULT_TIMEOUT = 10000;
 // const WS_CLOSE_NORMAL = 1000;
 
@@ -59,11 +59,11 @@ export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
   }
 
   private onOpen(_: Event) {
-    this.queue.forEach(queued => this.send(queued));
+    this.queue.forEach((queued) => this.send(queued));
     this.queue = [];
 
     if (this.hasRunner && !this.timer) {
-      this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
+      this.timer = setTimeout(() => this.heartbeat(), this.interval) as unknown as number;
     }
 
     this.socket.addEventListener('error', this.onError.bind(this));
@@ -88,6 +88,9 @@ export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
       this.subject.next(this.decoder(e.data));
     } catch (err) {
       this.subject.error(err);
+    }
+    if (this.hasRunner && !this.timer) {
+      this.timer = setTimeout(() => this.heartbeat(), this.interval) as unknown as number;
     }
   }
 
@@ -128,12 +131,9 @@ export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
     if (this.runner) {
       try {
         await Promise.race([this.runner(), new Promise((_, rej) => setTimeout(rej, this.timeout))]);
-        this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
+        this.timer = setTimeout(() => this.heartbeat(), this.interval) as unknown as number;
       } catch (err) {
-        this.timer = (setTimeout(
-          () => this.heartbeat(Math.min(backoff * 2, 8000)),
-          this.interval
-        ) as unknown) as number;
+        this.timer = setTimeout(() => this.heartbeat(Math.min(backoff * 2, 8000)), this.interval) as unknown as number;
       }
     }
   }
@@ -143,6 +143,6 @@ export class PhoenixSocket<Send = unknown, Receive = Send> extends EventTarget {
     this.interval = interval;
     this.runner = runner;
     this.timeout = timeout;
-    this.timer = (setTimeout(() => this.heartbeat(), this.interval) as unknown) as number;
+    this.timer = setTimeout(() => this.heartbeat(), this.interval) as unknown as number;
   }
 }
